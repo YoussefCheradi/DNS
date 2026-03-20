@@ -228,7 +228,6 @@ def save_to_excel(all_data, filepath="expired_domains.xlsx"):
         return
 
     try:
-        # Vérifier que le fichier est valide avant de le lire
         if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
             df_existing = pd.read_excel(filepath, engine="openpyxl")
             df_final = pd.concat([df_existing, df_new], ignore_index=True)
@@ -238,6 +237,19 @@ def save_to_excel(all_data, filepath="expired_domains.xlsx"):
     except (FileNotFoundError, ValueError):
         df_final = df_new
         print("  → Nouveau fichier créé")
+
+    # Trouver les doublons avant suppression
+    duplicated_mask = df_final.duplicated(subset=["Domain"], keep="first")
+    duplicated_domains = df_final[duplicated_mask]["Domain"].tolist()
+
+    if duplicated_domains:
+        print(f"  → {len(duplicated_domains)} doublons supprimés :")
+        for d in duplicated_domains:
+            print(f"      - {d}")
+    else:
+        print(f"  → Aucun doublon détecté")
+
+    df_final = df_final[~duplicated_mask]
 
     df_final.to_excel(filepath, index=False, engine="openpyxl")
     print(f"\n✅ Excel mis à jour avec {len(df_final)} domaines au total → {filepath}")
