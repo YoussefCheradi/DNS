@@ -215,74 +215,44 @@ def get_more_businesses_pages(driver, wait, query):
         time.sleep(random.uniform(3, 7))
         check_captcha(driver, url)
 
-        # Chercher bouton "More businesses"
+        # Chercher bouton "More businesses" OU "More places"
         more_btn = None
         selectors = [
             "//*[contains(text(),'More businesses')]",
             "//*[contains(text(),'More places')]",
             "//*[contains(text(),'Plus d')]",
+            "//*[contains(text(),'Plus de lieux')]",
         ]
-
         for selector in selectors:
             elements = driver.find_elements(By.XPATH, selector)
             if elements:
                 more_btn = elements[0]
+                print(f"  OK Bouton trouve : '{elements[0].text.strip()}'")
                 break
 
         if not more_btn:
-            print(f"  Info : Pas de 'More businesses' pour '{query}'")
+            print(f"  Info : Pas de 'More businesses' ni 'More places' pour '{query}'")
             return 0
 
         driver.execute_script("arguments[0].click();", more_btn)
-        print(f"  OK 'More businesses' trouve -> clic")
         time.sleep(random.uniform(3, 7))
 
-        page_num = 1
+        # ── Compter les span.SJajHc = nombre de O = nombre de pages ──
+        o_elements = driver.find_elements(By.CSS_SELECTOR, "span.SJajHc")
+        o_count = len(o_elements)
+        o_count = max(0, o_count - 2)
+        if o_count == 0:
+            result = "1"
+        elif o_count >= 10:
+            result = "10+"
+        else:
+            result = str(o_count)
 
-        while True:
-            # Sélecteur exact basé sur l'inspect : g-right-button[aria-label="Next"]
-            next_btns = driver.find_elements(By.CSS_SELECTOR,
-                "g-right-button[aria-label='Next']"
-            )
-
-            if not next_btns:
-                print(f"  -> More businesses pages : {page_num}")
-                break
-
-            btn = next_btns[0]
-
-            # Vérifier si le bouton est désactivé
-            is_disabled = (
-                btn.get_attribute("disabled") is not None or
-                btn.get_attribute("aria-disabled") == "true" or
-                "disabled" in (btn.get_attribute("class") or "")
-            )
-
-            if is_disabled:
-                print(f"  -> More businesses pages : {page_num}")
-                break
-
-            # Vérifier URL avant clic
-            current_url = driver.current_url
-
-            driver.execute_script("arguments[0].click();", btn)
-            page_num += 1
-            print(f"  -> More businesses page {page_num}...")
-            time.sleep(random.uniform(3, 7))
-
-            # Si URL n'a pas changé -> dernière page
-            if driver.current_url == current_url:
-                print(f"  -> URL inchangee, derniere page : {page_num}")
-                break
-
-            if page_num >= 20:
-                print("  -> Limite 20 pages atteinte")
-                break
-
-        return page_num
+        print(f"  -> Google Maps Pages : {result}")
+        return result
 
     except Exception as e:
-        print(f"  Erreur 'More businesses' pour '{query}' : {e}")
+        print(f"  Erreur 'More businesses/places' pour '{query}' : {e}")
         return 0
 
 # ======================
@@ -315,7 +285,6 @@ def enrich_with_google_data(filepath="expired_domains.xlsx"):
             query = domain_to_query(domain)
             print(f"\n[{idx+1}/{len(df)}] {domain} -> '{query}'")
 
-            # Lancer Chrome pour cette recherche
             print(f"  -> Lancement Chrome...")
             driver, wait = init_driver()
 
@@ -328,12 +297,12 @@ def enrich_with_google_data(filepath="expired_domains.xlsx"):
                 maps_pages = get_more_businesses_pages(driver, wait, query)
                 print(f"  -> Google Maps Pages : {maps_pages}")
 
+                # ✅ Ici à l'intérieur du try, après avoir les résultats
                 df.at[idx, "Google All Pages"] = all_pages
                 df.at[idx, "Google Maps Pages"] = maps_pages
                 df.to_excel(filepath, index=False, engine="openpyxl")
 
             finally:
-                # Fermer Chrome après chaque domaine
                 try:
                     driver.quit()
                 except:
