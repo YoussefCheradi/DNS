@@ -3,6 +3,7 @@ import time
 import random
 import pandas as pd
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
@@ -27,7 +28,12 @@ def init_driver():
     options.add_argument("--start-maximized")
     options.add_argument(r"--user-data-dir=C:\ChromeTemp")
     options.add_argument("--profile-directory=Default")
-    driver = uc.Chrome(options=options, use_subprocess=True, version_main=146)
+
+    try:
+        driver = uc.Chrome(options=options, use_subprocess=True)
+    except Exception:
+        driver = uc.Chrome(options=options, use_subprocess=True, version_main=154)
+
     wait = WebDriverWait(driver, 15)
     return driver, wait
 
@@ -195,16 +201,30 @@ def get_more_businesses_pages(driver, wait, query):
         # Vérifier captcha après clic More businesses
         check_captcha(driver, url)
 
-        # Compter les O
-        o_elements = driver.find_elements(By.CSS_SELECTOR, "span.SJajHc")
-        o_count = max(0, len(o_elements) - 2)
+        # Compter le nombre de pages Google Maps via les lettres O du tableau de pagination
+        page_count = 0
 
-        if o_count == 0:
+        try:
+            table = driver.find_element(By.XPATH, "//tbody")
+            o_elements = table.find_elements(By.XPATH, ".//span[contains(@class,'D2pCqd')]")
+            page_count = len(o_elements)
+            print(f"  -> O count tableau pagination : {page_count}")
+        except Exception:
+            page_count = 0
+
+        if page_count <= 0:
+            page_candidates = driver.find_elements(By.XPATH, "//a[contains(@href,'start=') or contains(@aria-label,'Page') or contains(@aria-label,'page')] ")
+            if page_candidates:
+                page_count = len(page_candidates)
+
+        page_count = max(0, page_count - 2)
+
+        if page_count <= 0:
             result = "1"
-        elif o_count >= 10:
+        elif page_count >= 10:
             result = "10"
         else:
-            result = str(o_count)
+            result = str(page_count)
 
         print(f"  -> Google Maps Pages : {result}")
         return result
@@ -218,7 +238,25 @@ def get_more_businesses_pages(driver, wait, query):
 # FONCTION PRINCIPALE
 # ======================
 
-def enrich_with_google_data(filepath="expired_domains.xlsx"):
+def enrich_with_google_data(filepath="expired_domains_TLD_net.xlsx"):
+    project_root = Path(__file__).resolve().parents[2]
+    target_path = project_root / "expired_domains_TLD_net.xlsx"
+
+    if filepath:
+        custom_path = Path(filepath).expanduser()
+        if custom_path.is_absolute():
+            target_path = custom_path
+        elif custom_path.name.lower() == "expired_domains.xlsx":
+            target_path = project_root / "expired_domains_TLD_net.xlsx"
+        else:
+            target_path = project_root / custom_path.name
+
+    filepath = str(target_path)
+
+    if not os.path.exists(filepath):
+        print(f"  -> Fichier introuvable : {filepath}")
+        print("  -> Vérifie que le scraping a bien généré expired_domains_TLD_net.xlsx avant de lancer l'enrichissement Google.")
+        return
 
     df = pd.read_excel(filepath, engine="openpyxl")
     print(f"  -> {len(df)} domaines charges")
@@ -226,6 +264,20 @@ def enrich_with_google_data(filepath="expired_domains.xlsx"):
     if "Domain" not in df.columns:
         print("Colonne Domain introuvable.")
         return
+
+    valid_mask = pd.Series(True, index=df.index)
+    if "HTTP Code" in df.columns:
+        valid_mask = df["HTTP Code"].fillna("").astype(str).str.strip().isin(["200", "301", "302"])
+        valid_count = int(valid_mask.sum())
+        print(f"  -> {valid_count} domaines conserves pour Google (HTTP Code 200/301/302 sur {len(df)})")
+        if valid_count == 0:
+            print("  -> Aucun domaine ne correspond au filtre HTTP Code 200/301/302. Google search non lance.")
+            return
+    else:
+        print("  -> Colonne HTTP Code absente : Google search applique sur tous les domaines.")
+
+    if "Domaine .net" not in df.columns:
+        df["Domaine .net"] = df["Domain"].map(lambda d: re.sub(r'\.com$', '.net', str(d), flags=re.IGNORECASE) if str(d).strip() else d)
 
     if "Google All Pages" in df.columns:
         df.drop(columns=["Google All Pages"], inplace=True)
@@ -235,17 +287,22 @@ def enrich_with_google_data(filepath="expired_domains.xlsx"):
     if "Sponsored Results" not in df.columns:
         df["Sponsored Results"] = None
 
+    rows_to_process = df.loc[valid_mask].copy()
+
     print(f"  -> Lancement Chrome...")
     driver, wait = init_driver()
 
     try:
-        for idx, row in df.iterrows():
+        for idx, row in rows_to_process.iterrows():
             domain = str(row["Domain"]).strip()
 
-            maps_val = row.get("Google Maps Pages")
-            sponsored_val = row.get("Sponsored Results")
+            maps_val = df.at[idx, "Google Maps Pages"]
+            sponsored_val = df.at[idx, "Sponsored Results"]
 
-            if pd.notna(maps_val) and str(maps_val).strip() != "" and pd.notna(sponsored_val):
+            has_maps = pd.notna(maps_val) and str(maps_val).strip() != ""
+            has_sponsored = pd.notna(sponsored_val) and str(sponsored_val).strip() != ""
+
+            if has_maps and has_sponsored:
                 print(f"  Skip : {domain}")
                 continue
 
@@ -255,18 +312,25 @@ def enrich_with_google_data(filepath="expired_domains.xlsx"):
             # Vérifier driver vivant
             driver, wait = get_or_restart_driver(driver, wait)
 
-            # 1. Sponsored Results (charge Google Search + check captcha)
-            sponsored = check_sponsored_results(driver, query)
+            sponsored = sponsored_val if has_sponsored else "Non"
+            maps_pages = maps_val if has_maps else "0"
+
+            if not has_sponsored:
+                # 1. Sponsored Results (charge Google Search + check captcha)
+                sponsored = check_sponsored_results(driver, query)
 
             # 2. Check captcha entre sponsored et more businesses
             url = f"https://www.google.com/search?q={query.replace(' ', '+')}&hl=en&gl=us"
             check_captcha(driver, url)
 
-            # 3. More businesses Pages (charge Google Search + check captcha)
-            maps_pages = get_more_businesses_pages(driver, wait, query)
+            if not has_maps:
+                # 3. More businesses Pages (charge Google Search + check captcha)
+                maps_pages = get_more_businesses_pages(driver, wait, query)
 
-            df.at[idx, "Google Maps Pages"] = maps_pages
-            df.at[idx, "Sponsored Results"] = sponsored
+            if not has_maps:
+                df.at[idx, "Google Maps Pages"] = maps_pages
+            if not has_sponsored:
+                df.at[idx, "Sponsored Results"] = sponsored
             df.to_excel(filepath, index=False, engine="openpyxl")
 
             delay = random.uniform(5, 15)

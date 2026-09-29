@@ -5,6 +5,7 @@ import imaplib
 import email
 import re
 import os
+from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
@@ -12,6 +13,15 @@ from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from datetime import datetime
+
+
+def domain_to_net(domain):
+    if pd.isna(domain):
+        return domain
+    value = str(domain).strip()
+    if not value:
+        return value
+    return re.sub(r'\.com$', '.net', value, flags=re.IGNORECASE)
 
 
 def get_verification_code_from_gmail(gmail_address, app_password, retries=5, delay=10):
@@ -110,6 +120,14 @@ def setup_filters(driver, wait):
     driver.execute_script("arguments[0].click();", common_tab)
     time.sleep(1)
 
+    # heure_box = wait.until(EC.presence_of_element_located((By.ID, "flast48")))
+    # if not heure_box.is_selected():
+    #     driver.execute_script("arguments[0].click();", heure_box)
+
+    Hyphens_box = wait.until(EC.presence_of_element_located((By.ID, "fsephost")))
+    if not Hyphens_box.is_selected():
+        driver.execute_script("arguments[0].click();", Hyphens_box)
+
     char_box = wait.until(EC.presence_of_element_located((By.ID, "fonlycharhost")))
     if not char_box.is_selected():
         driver.execute_script("arguments[0].click();", char_box)
@@ -127,6 +145,15 @@ def setup_filters(driver, wait):
         driver.execute_script("arguments[0].click();", whois_box)
 
     Select(driver.find_element(By.ID, "flimit")).select_by_value("200")
+
+    # Additional Tab
+    additional_tab = wait.until(EC.presence_of_element_located((By.XPATH, "//a[@data-target='#additional']")))
+    driver.execute_script("arguments[0].click();", additional_tab)
+    time.sleep(1)
+
+    TLD_box = wait.until(EC.presence_of_element_located((By.ID, "fstatusnetnot")))
+    if not TLD_box.is_selected():
+        driver.execute_script("arguments[0].click();", TLD_box)
 
     # SEO Tab
     seo_tab = wait.until(EC.presence_of_element_located((By.XPATH, "//a[@data-target='#seo']")))
@@ -197,7 +224,7 @@ def scrape_city(driver, wait, city):
                     city_data.append({
                         "City": city,
                         "Domain": domain,
-                        "Date Scraping": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        "Date Scraping from E_D": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     })
 
         print(f"  → {len(city_data)} domaines pour {city} jusqu'ici")
@@ -220,16 +247,24 @@ def scrape_city(driver, wait, city):
     return city_data
 
 
-def save_to_excel(all_data, filepath="expired_domains.xlsx"):
+def save_to_excel(all_data, filepath="expired_domains_TLD_net.xlsx"):
+    filepath = str(Path(filepath).expanduser()) if not os.path.isabs(filepath) else filepath
+    if not os.path.isabs(filepath):
+        filepath = str(Path(__file__).resolve().parents[2] / filepath)
     df_new = pd.DataFrame(all_data)
 
     if df_new.empty:
         print("\n⚠️  Aucune donnée collectée.")
         return
 
+    if "Domain" in df_new.columns and "Domaine .net" not in df_new.columns:
+        df_new["Domaine .net"] = df_new["Domain"].map(domain_to_net)
+
     try:
         if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
             df_existing = pd.read_excel(filepath, engine="openpyxl")
+            if "Domaine .net" not in df_existing.columns and "Domain" in df_existing.columns:
+                df_existing["Domaine .net"] = df_existing["Domain"].map(domain_to_net)
             df_final = pd.concat([df_existing, df_new], ignore_index=True)
             print(f"  → {len(df_existing)} lignes existantes + {len(df_new)} nouvelles")
         else:
