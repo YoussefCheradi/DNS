@@ -76,7 +76,7 @@ def init_driver():
     return driver, wait
 
 
-def login(driver, wait, username, password, gmail_address, gmail_app_password):
+def login(driver, wait, username, password, gmail_address, gmail_app_password, allow_manual_code=True):
     driver.get("https://expireddomains.net/login/")
     wait.until(EC.presence_of_element_located((By.NAME, "login"))).send_keys(username)
     driver.find_element(By.NAME, "password").send_keys(password)
@@ -90,6 +90,12 @@ def login(driver, wait, username, password, gmail_address, gmail_app_password):
 
     if verification_field:
         print("Page de vérification détectée → récupération du code Gmail...")
+        if not allow_manual_code and not (gmail_address and gmail_app_password):
+            raise RuntimeError(
+                "La double authentification ExpiredDomains est activée. "
+                "Renseignez l'adresse Gmail et son mot de passe d'application."
+            )
+
         code = get_verification_code_from_gmail(gmail_address, gmail_app_password)
 
         if code:
@@ -102,6 +108,11 @@ def login(driver, wait, username, password, gmail_address, gmail_app_password):
             time.sleep(5)
         else:
             print("❌ Code non trouvé dans Gmail")
+            if not allow_manual_code:
+                raise RuntimeError(
+                    "Code de vérification Gmail indisponible. Vérifiez l'adresse Gmail "
+                    "et le mot de passe d'application, puis relancez le traitement."
+                )
             input("Entre le code manuellement, puis appuie sur Entrée pour continuer...")
     else:
         print("✅ Pas de vérification requise, connexion directe")

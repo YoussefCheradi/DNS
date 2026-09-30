@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f5ef">
+  <title>Fast Domain Name</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='fast-domains.css') }}">
+  <script src="{{ url_for('static', filename='fast-domains.js') }}" defer></script>
+</head>
+<body>
+  <div class="page-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Fast Domain Name, accueil">
+        <span class="brand-mark">FD</span>
+        <span>Fast Domain Name</span>
+      </a>
+      <div class="local-indicator"><span class="local-dot"></span> SESSION LOCALE</div>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">RECHERCHE DE DOMAINES · EXPORT EXCEL</p>
+          <h1 id="page-title">Trouvez votre prochain domaine.</h1>
+          <p class="intro-copy">Lancez la collecte, vérifiez les domaines et récupérez les résultats dans un seul classeur.</p>
+        </div>
+        <div class="output-tag" aria-label="Nom du fichier de sortie">
+          <span class="output-kicker">FICHIER DE SORTIE</span>
+          <strong>expired_domains_TLD_net.xlsx</strong>
+          <span class="file-type">XLSX <span>·</span> EXCEL</span>
+        </div>
+      </section>
+
+      <div class="workspace">
+        <form id="search-form" class="form-panel">
+          <section class="form-section">
+            <div class="section-heading">
+              <span class="step-number">01</span>
+              <div>
+                <h2>Votre zone de recherche</h2>
+                <p>Une ville par ligne. Jusqu’à 50 villes et 5 pages par ville.</p>
+              </div>
+            </div>
+            <label for="cities">Villes à explorer</label>
+            <textarea id="cities" name="cities" rows="6" required maxlength="3000" spellcheck="false">{{ default_cities | join('\n') }}</textarea>
+            <div class="field-meta"><span>Exemples chargés depuis la liste du projet, modifiables.</span><span id="city-count">0 ville</span></div>
+          </section>
+
+          <section class="form-section">
+            <div class="section-heading">
+              <span class="step-number">02</span>
+              <div>
+                <h2>Compte ExpiredDomains</h2>
+                <p>Ces identifiants sont utilisés uniquement pendant le traitement.</p>
+              </div>
+            </div>
+            <div class="field-grid">
+              <div class="field-wrap">
+                <label for="username">Nom d’utilisateur</label>
+                <input id="username" name="username" autocomplete="username" required placeholder="Votre identifiant">
+              </div>
+              <div class="field-wrap">
+                <label for="password">Mot de passe</label>
+                <input id="password" name="password" type="password" autocomplete="current-password" required placeholder="••••••••••••">
+              </div>
+            </div>
+            <details class="optional-fields">
+              <summary>Configurer la vérification e-mail (facultatif)</summary>
+              <p>À renseigner seulement si votre compte demande un code de vérification Gmail.</p>
+              <div class="field-grid">
+                <div class="field-wrap">
+                  <label for="gmail-address">Adresse Gmail</label>
+                  <input id="gmail-address" name="gmail_address" type="email" autocomplete="email" placeholder="nom@gmail.com">
+                </div>
+                <div class="field-wrap">
+                  <label for="gmail-app-password">Mot de passe d’application</label>
+                  <input id="gmail-app-password" name="gmail_app_password" type="password" autocomplete="off" placeholder="Mot de passe d’application Gmail">
+                </div>
+              </div>
+            </details>
+          </section>
+
+          <section class="form-section last-section">
+            <div class="section-heading">
+              <span class="step-number">03</span>
+              <div>
+                <h2>Étapes d’analyse</h2>
+                <p>Désactivez une étape si vous souhaitez uniquement collecter les domaines.</p>
+              </div>
+            </div>
+            <div class="option-list">
+              <label class="option-row" for="run-dns">
+                <input id="run-dns" name="run_dns" type="checkbox" checked>
+                <span class="checkmark" aria-hidden="true"></span>
+                <span class="option-copy"><strong>Statut DNS et HTTP</strong><small>SEO Web Checker · statut, code HTTP et adresse IP</small></span>
+                <span class="option-index">02</span>
+              </label>
+              <label class="option-row" for="run-google">
+                <input id="run-google" name="run_google" type="checkbox" checked>
+                <span class="checkmark" aria-hidden="true"></span>
+                <span class="option-copy"><strong>Google et Maps</strong><small>Résultats sponsorisés et pagination Google Maps</small></span>
+                <span class="option-index">03</span>
+              </label>
+            </div>
+          </section>
+
+          <div class="submit-row">
+            <button id="submit-button" class="primary-button" type="submit">
+              <span>Lancer la recherche</span><span class="button-arrow" aria-hidden="true">→</span>
+            </button>
+            <p>Chrome s’ouvrira sur cet ordinateur pendant les vérifications.</p>
+          </div>
+          <div id="form-error" class="form-error" role="alert" hidden></div>
+        </form>
+
+        <aside class="status-panel" aria-label="État du traitement">
+          <div class="status-topline"><span>ACTIVITÉ</span><span class="status-symbol" aria-hidden="true">◎</span></div>
+          <h2 id="status-title">Prêt à chercher</h2>
+          <p id="status-description">Configurez vos villes et vos identifiants pour préparer un fichier Excel.</p>
+
+          <div class="progress-block">
+            <div class="progress-label"><span>PROGRESSION</span><span id="progress-value">0%</span></div>
+            <div class="progress-track" role="progressbar" aria-label="Progression du traitement" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <span id="progress-fill"></span>
+            </div>
+          </div>
+
+          <div class="activity-block">
+            <div class="activity-heading"><span>JOURNAL</span><span id="activity-state">EN ATTENTE</span></div>
+            <ol id="activity-log" class="activity-log" aria-live="polite">
+              <li class="log-muted">Les étapes apparaîtront ici.</li>
+            </ol>
+          </div>
+
+          <div id="download-block" class="download-block" hidden>
+            <div class="download-ready"><span class="ready-mark">✓</span><div><strong>Votre fichier est prêt</strong><small id="result-count">0 domaine</small></div></div>
+            <a id="download-link" class="download-button" href="#">Télécharger le fichier <span aria-hidden="true">↓</span></a>
+          </div>
+
+          <p class="privacy-note"><span class="privacy-mark">●</span> Les identifiants ne sont pas enregistrés dans un fichier. Cette application accepte uniquement les connexions depuis cet ordinateur.</p>
+        </aside>
+      </div>
+    </main>
+
+    <footer class="footer"><span>FAST DOMAIN NAME</span><span>RECHERCHE LOCALE · EXPORT .XLSX</span></footer>
+  </div>
+</body>
+</html>

@@ -1,3 +1,8 @@
 .env
 expired_domains.xlsx
 expired_domains - ANA.xlsx
+.venv/
+.venv-1/
+__pycache__/
+*.py[cod]
+dns_checker_results.xlsx

@@ -204,7 +204,7 @@ def bulk_check_domains(file_path: str | Path | None = None, auto_close: bool = F
         rows = extract_results_table(driver, len(domains))
         df_results = pd.DataFrame(rows)
 
-        raw_results_path = PROJECT_ROOT / "dns_checker_results.xlsx"
+        raw_results_path = excel_path.parent / "dns_checker_results.xlsx"
         if df_results.empty:
             print("⚠️ Aucune ligne détectée dans le tableau de résultats.")
             return False
