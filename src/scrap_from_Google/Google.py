@@ -13,6 +13,10 @@ from selenium.webdriver.support import expected_conditions as EC
 load_dotenv()
 
 
+class CaptchaDetected(RuntimeError):
+    pass
+
+
 # ======================
 # UTILITAIRES
 # ======================
@@ -23,14 +27,31 @@ def domain_to_query(domain):
     return words
 
 
-def init_driver():
+def init_driver(headless=False):
     options = uc.ChromeOptions()
-    options.add_argument("--start-maximized")
-    options.add_argument(r"--user-data-dir=C:\ChromeTemp")
-    options.add_argument("--profile-directory=Default")
+    chrome_binary = os.getenv("CHROME_BIN")
+    if chrome_binary:
+        options.binary_location = chrome_binary
 
-    print("  -> Initialisation Chrome 154...", flush=True)
-    driver = uc.Chrome(options=options, use_subprocess=True, version_main=154)
+    if headless:
+        options.add_argument("--headless=new")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--window-size=1920,1080")
+        version_main = None
+    else:
+        options.add_argument("--start-maximized")
+        options.add_argument(r"--user-data-dir=C:\ChromeTemp")
+        options.add_argument("--profile-directory=Default")
+        version_main = 154
+
+    print("  -> Initialisation Chrome headless..." if headless else "  -> Initialisation Chrome 154...", flush=True)
+    driver = uc.Chrome(
+        options=options,
+        use_subprocess=True,
+        version_main=version_main,
+        browser_executable_path=chrome_binary,
+    )
     print("  -> Chrome prêt", flush=True)
 
     wait = WebDriverWait(driver, 15)
@@ -45,23 +66,25 @@ def is_driver_alive(driver):
         return False
 
 
-def get_or_restart_driver(driver, wait):
+def get_or_restart_driver(driver, wait, headless=False):
     if not is_driver_alive(driver):
         print("  -> Driver mort, redemarrage...")
         try:
             driver.quit()
         except:
             pass
-        driver, wait = init_driver()
+        driver, wait = init_driver(headless=headless)
         print("  -> Driver redemarre OK")
     return driver, wait
 
 
 
 
-def check_captcha(driver, url):
+def check_captcha(driver, url, headless=False):
     if "sorry" in driver.current_url or "captcha" in driver.page_source.lower():
         print("  reCAPTCHA detecte - verification iframe...")
+        if headless:
+            raise CaptchaDetected("Google a demandé une validation CAPTCHA sur le serveur.")
 
         iframes = driver.find_elements(By.XPATH, "//iframe[contains(@src,'recaptcha') and contains(@src,'anchor')]")
         if not iframes:
@@ -135,12 +158,12 @@ def check_captcha(driver, url):
 # SPONSORED RESULTS
 # ======================
 
-def check_sponsored_results(driver, query):
+def check_sponsored_results(driver, query, headless=False):
     try:
         url = f"https://www.google.com/search?q={query.replace(' ', '+')}&hl=en&gl=us"
         driver.get(url)
         time.sleep(random.uniform(3, 7))
-        check_captcha(driver, url)
+        check_captcha(driver, url, headless=headless)
 
         sponsored_selectors = [
             "//*[contains(text(),'Sponsored')]",
@@ -158,6 +181,8 @@ def check_sponsored_results(driver, query):
         print(f"  -> Sponsored Results : Non")
         return "Non"
 
+    except CaptchaDetected:
+        raise
     except Exception as e:
         print(f"  Erreur check sponsored : {e}")
         return "Non"
@@ -167,12 +192,12 @@ def check_sponsored_results(driver, query):
 # GOOGLE MAPS : MORE BUSINESSES
 # ======================
 
-def get_more_businesses_pages(driver, wait, query):
+def get_more_businesses_pages(driver, wait, query, headless=False):
     try:
         url = f"https://www.google.com/search?q={query.replace(' ', '+')}&hl=en&gl=us"
         driver.get(url)
         time.sleep(random.uniform(3, 7))
-        check_captcha(driver, url)
+        check_captcha(driver, url, headless=headless)
 
         more_btn = None
         selectors = [
@@ -198,7 +223,7 @@ def get_more_businesses_pages(driver, wait, query):
         time.sleep(random.uniform(3, 7))
 
         # Vérifier captcha après clic More businesses
-        check_captcha(driver, url)
+        check_captcha(driver, url, headless=headless)
 
         # Compter le nombre de pages Google Maps via les lettres O du tableau de pagination
         page_count = 0
@@ -228,6 +253,8 @@ def get_more_businesses_pages(driver, wait, query):
         print(f"  -> Google Maps Pages : {result}")
         return result
 
+    except CaptchaDetected:
+        raise
     except Exception as e:
         print(f"  Erreur 'More businesses/places' pour '{query}' : {e}")
         return 0
@@ -237,7 +264,7 @@ def get_more_businesses_pages(driver, wait, query):
 # FONCTION PRINCIPALE
 # ======================
 
-def enrich_with_google_data(filepath="expired_domains_TLD_net.xlsx"):
+def enrich_with_google_data(filepath="expired_domains_TLD_net.xlsx", headless=False):
     project_root = Path(__file__).resolve().parents[2]
     target_path = project_root / "expired_domains_TLD_net.xlsx"
 
@@ -289,7 +316,7 @@ def enrich_with_google_data(filepath="expired_domains_TLD_net.xlsx"):
     rows_to_process = df.loc[valid_mask].copy()
 
     print(f"  -> Lancement Chrome...")
-    driver, wait = init_driver()
+    driver, wait = init_driver(headless=headless)
 
     try:
         for idx, row in rows_to_process.iterrows():
@@ -309,22 +336,22 @@ def enrich_with_google_data(filepath="expired_domains_TLD_net.xlsx"):
             print(f"\n[{idx+1}/{len(df)}] {domain} -> '{query}'")
 
             # Vérifier driver vivant
-            driver, wait = get_or_restart_driver(driver, wait)
+            driver, wait = get_or_restart_driver(driver, wait, headless=headless)
 
             sponsored = sponsored_val if has_sponsored else "Non"
             maps_pages = maps_val if has_maps else "0"
 
             if not has_sponsored:
                 # 1. Sponsored Results (charge Google Search + check captcha)
-                sponsored = check_sponsored_results(driver, query)
+                sponsored = check_sponsored_results(driver, query, headless=headless)
 
             # 2. Check captcha entre sponsored et more businesses
             url = f"https://www.google.com/search?q={query.replace(' ', '+')}&hl=en&gl=us"
-            check_captcha(driver, url)
+            check_captcha(driver, url, headless=headless)
 
             if not has_maps:
                 # 3. More businesses Pages (charge Google Search + check captcha)
-                maps_pages = get_more_businesses_pages(driver, wait, query)
+                maps_pages = get_more_businesses_pages(driver, wait, query, headless=headless)
 
             if not has_maps:
                 df.at[idx, "Google Maps Pages"] = maps_pages
@@ -338,6 +365,8 @@ def enrich_with_google_data(filepath="expired_domains_TLD_net.xlsx"):
 
     except Exception as e:
         print(f"\nErreur generale : {e}")
+        if headless:
+            raise
 
     finally:
         try:

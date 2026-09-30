@@ -13,6 +13,7 @@ const activityLog = document.querySelector("#activity-log");
 const downloadBlock = document.querySelector("#download-block");
 const downloadLink = document.querySelector("#download-link");
 const resultCount = document.querySelector("#result-count");
+const demoMode = document.body.dataset.demo === "true";
 
 let polling = false;
 
@@ -32,8 +33,8 @@ function renderJob(job) {
   statusDescription.textContent = job.status === "failed"
     ? (job.error || "Le traitement n’a pas pu aboutir.")
     : job.status === "completed"
-      ? "Le classeur est prêt à être téléchargé sur cet ordinateur."
-      : "Le traitement continue en arrière-plan sur cet ordinateur.";
+      ? (job.demo_mode ? "Simulation terminée ; le fichier contient des valeurs fictives." : "Le classeur est prêt à être téléchargé.")
+      : (job.demo_mode ? "Création du classeur de test en cours…" : "Le traitement continue en arrière-plan sur le serveur.");
 
   const progress = Math.max(0, Math.min(100, Number(job.progress) || 0));
   progressFill.style.width = `${progress}%`;
@@ -66,7 +67,9 @@ function renderJob(job) {
 
   const finished = job.status === "completed" || job.status === "failed";
   submitButton.disabled = !finished;
-  submitButton.querySelector("span:first-child").textContent = finished ? "Lancer une autre recherche" : "Traitement en cours…";
+  submitButton.querySelector("span:first-child").textContent = finished
+    ? (demoMode ? "Créer un autre fichier de démo" : "Lancer une autre recherche")
+    : (demoMode ? "Création en cours…" : "Traitement en cours…");
   if (finished) polling = false;
 }
 
@@ -106,13 +109,13 @@ form.addEventListener("submit", async (event) => {
   }
 
   const data = Object.fromEntries(new FormData(form));
-  data.run_dns = document.querySelector("#run-dns").checked;
-  data.run_google = document.querySelector("#run-google").checked;
+  data.run_dns = document.querySelector("#run-dns")?.checked ?? false;
+  data.run_google = document.querySelector("#run-google")?.checked ?? false;
 
   submitButton.disabled = true;
-  submitButton.querySelector("span:first-child").textContent = "Préparation…";
+  submitButton.querySelector("span:first-child").textContent = demoMode ? "Préparation de la démo…" : "Préparation…";
   statusTitle.textContent = "Demande envoyée";
-  statusDescription.textContent = "Connexion au navigateur et préparation du traitement…";
+  statusDescription.textContent = demoMode ? "Préparation d’un classeur d’exemple…" : "Connexion au navigateur et préparation du traitement…";
 
   try {
     const response = await fetch("/api/jobs", {
@@ -122,8 +125,10 @@ form.addEventListener("submit", async (event) => {
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "Impossible de démarrer le traitement.");
-    document.querySelector("#password").value = "";
-    document.querySelector("#gmail-app-password").value = "";
+    const passwordField = document.querySelector("#password");
+    const gmailPasswordField = document.querySelector("#gmail-app-password");
+    if (passwordField) passwordField.value = "";
+    if (gmailPasswordField) gmailPasswordField.value = "";
     form.querySelectorAll("input, textarea, button").forEach((field) => { field.disabled = true; });
     await pollJob(result.status_url);
   } catch (error) {

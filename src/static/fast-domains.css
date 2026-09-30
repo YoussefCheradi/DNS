@@ -52,6 +52,7 @@ textarea:focus, input:not([type="checkbox"]):focus { border-color: var(--green);
 .optional-fields summary { width: fit-content; color: var(--green-dark); font-size: 12px; font-weight: 600; cursor: pointer; }
 .optional-fields > p { margin: 10px 0 14px; color: var(--muted); font-size: 11px; }
 .optional-fields[open] .field-grid { animation: arrive .2s ease-out both; }
+.demo-notice { margin: 0; padding: 12px 14px; border-left: 3px solid var(--coral); background: #fff4ee; color: #754839; font-size: 12px; line-height: 1.55; }
 .last-section { margin-bottom: 20px; }
 .option-list { display: grid; gap: 9px; }
 .option-row { position: relative; display: flex; align-items: center; gap: 12px; min-height: 58px; margin: 0; padding: 9px 12px; border: 1px solid var(--line); background: rgba(255,255,255,.67); cursor: pointer; }

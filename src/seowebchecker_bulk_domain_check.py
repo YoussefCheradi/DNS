@@ -1,4 +1,5 @@
 import time
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -111,8 +112,21 @@ def merge_dns_results_into_main_excel(main_excel_path: Path, dns_results_path: P
     return main_df
 
 
-def init_driver():
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
+def init_driver(headless=False):
+    options = webdriver.ChromeOptions()
+    chrome_binary = os.getenv("CHROME_BIN")
+    driver_binary = os.getenv("CHROMEDRIVER_PATH")
+
+    if chrome_binary:
+        options.binary_location = chrome_binary
+    if headless:
+        options.add_argument("--headless=new")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--window-size=1920,1080")
+
+    service = Service(driver_binary) if driver_binary else Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
     wait = WebDriverWait(driver, 20)
     return driver, wait
 
@@ -160,7 +174,7 @@ def extract_results_table(driver, expected_count):
     return result_rows
 
 
-def bulk_check_domains(file_path: str | Path | None = None, auto_close: bool = False):
+def bulk_check_domains(file_path: str | Path | None = None, auto_close: bool = False, headless=False):
     if file_path is None:
         excel_path = PROJECT_ROOT / "expired_domains_TLD_net.xlsx"
     else:
@@ -179,7 +193,7 @@ def bulk_check_domains(file_path: str | Path | None = None, auto_close: bool = F
 
     print(f"Chargement de {len(domains)} domaines depuis : {excel_path}")
 
-    driver, wait = init_driver()
+    driver, wait = init_driver(headless=headless)
     try:
         driver.get("https://seowebchecker.com/bulk-domain-search")
         wait.until(EC.presence_of_element_located((By.ID, "domainInput")))

@@ -2,7 +2,7 @@
 
 Projet Python qui collecte des domaines expirés, vérifie leur statut DNS/HTTP, puis ajoute des indicateurs issus de Google et Google Maps dans un classeur Excel.
 
-> **Application web :** le formulaire local exécute le pipeline de collecte, de vérification et d’enrichissement. `src/main.py` reste un ancien point d’entrée en ligne de commande et ne lance actuellement que l’enrichissement Google.
+> **Application web :** le code sait exécuter le pipeline depuis un serveur. La configuration Render actuelle utilise le plan gratuit en mode simulation et produit un classeur d’exemple sans lancer les scrapers. `src/main.py` reste un ancien point d’entrée en ligne de commande.
 
 ## Sommaire
 
@@ -30,10 +30,13 @@ L’application web peut lancer les trois étapes à la suite. Le point d’entr
 | Chemin | Rôle |
 | --- | --- |
 | `src/main.py` | Orchestrateur. Actuellement, seul l’enrichissement Google Selenium est actif. |
-| `src/web_app.py` | Application web locale, tâches en arrière-plan, progression et téléchargement du classeur. |
+| `src/web_app.py` | Application web, jobs en arrière-plan, mode simulation, progression et téléchargement du classeur. |
 | `src/templates/index.html` | Formulaire et panneau de suivi. |
 | `src/static/` | Styles et logique d’interface web. |
 | `requirements.txt` | Dépendances Python du projet et de l’application web. |
+| `Dockerfile` | Image Linux avec Chromium headless et Gunicorn. |
+| `render.yaml` | Configuration Render et contrôle de santé. |
+| `.dockerignore` | Exclut les secrets et fichiers locaux du contexte Docker. |
 | `src/scrap_from_E_D/E_D.py` | Connexion à ExpiredDomains, configuration des filtres, pagination et sauvegarde Excel. |
 | `src/seowebchecker_bulk_domain_check.py` | Vérification en lot sur SEO Web Checker et fusion des colonnes DNS dans le classeur principal. |
 | `src/scrap_from_Google/Google.py` | Recherche Google/Google Maps avec Selenium et `undetected_chromedriver`. C’est l’implémentation appelée par `main.py`. |
@@ -46,8 +49,9 @@ L’application web peut lancer les trois étapes à la suite. Le point d’entr
 ## Prérequis
 
 - Windows et Python 3.10 ou plus récent.
-- Google Chrome installé. `Google.py` utilise actuellement `undetected_chromedriver` avec la version majeure **154** ; si Chrome est mis à jour vers une autre version majeure, cette valeur dans `src/scrap_from_Google/Google.py` devra être adaptée.
+- Google Chrome installé pour les exécutions locales. Le CLI de `Google.py` utilise actuellement `undetected_chromedriver` avec la version majeure **154**. Le conteneur Linux choisit la version de Chromium installée dans l’image.
 - Une connexion Internet pour les sites consultés et le téléchargement éventuel des pilotes Chrome.
+- Pour Render : un dépôt GitHub accessible par Render et un compte Render. Le blueprint utilise le plan gratuit pour la simulation. Le traitement réel avec Chromium headless nécessite un plan plus puissant ; le passage proposé est `1c-2g` (1 CPU, 2 Go de RAM), payant.
 - Un compte ExpiredDomains pour l’étape de collecte. Gmail et un mot de passe d’application sont nécessaires seulement si la vérification en deux étapes demande un code par e-mail.
 - Une clé Serper seulement pour la variante `Google2.py`.
 
@@ -92,11 +96,26 @@ Lancez le serveur local :
 python src/web_app.py
 ```
 
-Ouvrez ensuite [http://127.0.0.1:5000](http://127.0.0.1:5000). Entrez une ville par ligne, vos identifiants ExpiredDomains et, si la double authentification est activée, votre adresse Gmail et son mot de passe d’application. Les dix premières villes de `src/citys/us_cities_sample.xlsx` sont proposées par défaut ; vous pouvez les modifier. La limite est de 50 villes par recherche.
+En local, ouvrez ensuite [http://127.0.0.1:5000](http://127.0.0.1:5000). Entrez une ville par ligne, vos identifiants ExpiredDomains et, si la double authentification est activée, votre adresse Gmail et son mot de passe d’application. Les dix premières villes de `src/citys/us_cities_sample.xlsx` sont proposées par défaut ; vous pouvez les modifier. La limite est de 50 villes par recherche.
 
-Choisissez ensuite les analyses SEO Web Checker et Google/Maps à exécuter. La page suit le traitement et affiche le lien de téléchargement quand `expired_domains_TLD_net.xlsx` est prêt. Chrome s’ouvre sur la machine locale pendant les vérifications. Un seul traitement peut tourner à la fois.
+En mode normal, choisissez les analyses SEO Web Checker et Google/Maps à exécuter. La page suit le traitement et affiche le lien de téléchargement quand `expired_domains_TLD_net.xlsx` est prêt. Chrome s’ouvre sur la machine locale pendant les vérifications. Un seul traitement peut tourner à la fois.
 
-L’application écoute uniquement sur `127.0.0.1` et n’est pas configurée pour être exposée sur Internet. Les identifiants sont transmis au processus local pour le traitement et ne sont pas écrits dans un fichier. Si la récupération automatique du code de vérification Gmail échoue, le traitement s’arrête avec une erreur au lieu d’attendre une saisie dans le terminal.
+En local, l’application écoute uniquement sur `127.0.0.1`. Les identifiants sont transmis au processus local pour le traitement et ne sont pas écrits dans un fichier. Si la récupération automatique du code de vérification Gmail échoue, le traitement s’arrête avec une erreur au lieu d’attendre une saisie dans le terminal.
+
+### Simulation gratuite sur Render
+
+1. Poussez la branche `website_cloud` vers le dépôt GitHub relié à Render.
+2. Dans Render, créez un **Blueprint** et choisissez le dépôt ainsi que la branche `website_cloud`. Render lit `render.yaml`, construit le `Dockerfile` et lance Gunicorn.
+3. Conservez le plan **Free** et `DEMO_MODE=true` pour cette première simulation.
+4. Ouvrez l’URL `https://<nom-du-service>.onrender.com` affichée par Render. La page permet de créer et télécharger un classeur d’exemple de trois lignes, sans identifiants et sans requête vers ExpiredDomains, SEO Web Checker ou Google. `/healthz` est utilisé pour le contrôle de santé.
+
+Les services Render gratuits peuvent s’endormir après une période sans requête, redémarrer et effacer leurs fichiers temporaires. C’est adapté à une démonstration de l’interface, pas à un traitement Selenium fiable. Le service limite les créations à 5 jobs par adresse IP et par heure et n’exécute qu’un job à la fois.
+
+### Passage au traitement réel
+
+Quand vous serez prêt à lancer les recherches réelles, modifiez `render.yaml` : passez `plan: free` à `plan: 1c-2g` et `DEMO_MODE` à `"false"`, puis synchronisez/redéployez le Blueprint Render. Le formulaire demandera alors les identifiants ExpiredDomains et, si nécessaire, Gmail. Les valeurs restent en mémoire pendant le job. Le service utilise Chromium headless ; Google peut afficher un CAPTCHA, auquel cas le classeur peut être partiel. Vérifiez le prix du plan avant de confirmer la mise à niveau.
+
+Les traitements et les fichiers de sortie sont temporaires, disponibles pendant une heure au maximum. Un redémarrage ou redéploiement interrompt les traitements et invalide les liens. Gardez un seul worker Gunicorn : le suivi des jobs est stocké en mémoire.
 
 ### Enrichissement Google en ligne de commande
 
@@ -144,7 +163,7 @@ python coordonner.py
 
 ## Classeur Excel
 
-Le fichier principal est `expired_domains_TLD_net.xlsx`, à la racine. Pour le vérificateur SEO, la colonne de domaine reconnue est `Domaine .net`, avec `Domain` comme solution de repli. Pour l’enrichissement Google, le nom requis est `Domain`.
+Les scripts en ligne de commande utilisent par défaut `expired_domains_TLD_net.xlsx` à la racine. Le site web crée un classeur séparé dans un dossier temporaire par traitement et le télécharge sous ce même nom ; il ne remplace pas le fichier de la racine. Pour le vérificateur SEO, la colonne de domaine reconnue est `Domaine .net`, avec `Domain` comme solution de repli. Pour l’enrichissement Google, le nom requis est `Domain`.
 
 Colonnes utilisées ou ajoutées par les scripts :
 
@@ -168,6 +187,7 @@ Faites une copie du classeur avant une exécution importante. Fermez-le dans Exc
 
 - **`ModuleNotFoundError`** : activez `.venv` et installez les dépendances listées plus haut.
 - **Chrome ou ChromeDriver ne démarre pas** : vérifiez que Chrome est installé, que sa version majeure correspond à celle configurée dans `Google.py`, et que le téléchargement du pilote est autorisé par le réseau.
+- **Le déploiement Render redémarre ou Chrome manque de mémoire** : vérifiez les journaux Render, le plan `1c-2g`, et que le service utilise bien `Dockerfile` et `render.yaml`.
 - **Aucun domaine n’est envoyé à Google** : vérifiez les valeurs exactes de `HTTP Code` (`200`, `301`, `302`, `405`) et que la colonne `Domain` existe.
 - **Une ligne Google est ignorée** : si `Google Maps Pages` et `Sponsored Results` sont déjà renseignées, le script la considère comme terminée.
 - **Le tableau SEO Web Checker n’est pas complet** : le script attend jusqu’à 300 secondes que toutes les lignes soumises apparaissent. En cas d’échec, l’exception indique le nombre attendu et le nombre détecté.

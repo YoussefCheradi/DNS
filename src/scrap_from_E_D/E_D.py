@@ -70,8 +70,21 @@ def get_verification_code_from_gmail(gmail_address, app_password, retries=5, del
     return None
 
 
-def init_driver():
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
+def init_driver(headless=False):
+    options = webdriver.ChromeOptions()
+    chrome_binary = os.getenv("CHROME_BIN")
+    driver_binary = os.getenv("CHROMEDRIVER_PATH")
+
+    if chrome_binary:
+        options.binary_location = chrome_binary
+    if headless:
+        options.add_argument("--headless=new")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--window-size=1920,1080")
+
+    service = Service(driver_binary) if driver_binary else Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
     wait = WebDriverWait(driver, 20)
     return driver, wait
 
@@ -205,8 +218,8 @@ def scrape_city(driver, wait, city):
     # Modifier le champ Contains
     domain_input = wait.until(EC.presence_of_element_located((By.NAME, "fdomainand")))
     driver.execute_script("arguments[0].scrollIntoView(true);", domain_input)
-    driver.execute_script("arguments[0].value = '';", domain_input)
-    driver.execute_script(f"arguments[0].value = '{city}';", domain_input)
+    driver.execute_script("arguments[0].value = arguments[1];", domain_input, "")
+    driver.execute_script("arguments[0].value = arguments[1];", domain_input, city)
     time.sleep(1)
 
     # Appliquer le filtre

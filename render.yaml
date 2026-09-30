@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: fast-domain-name
+    runtime: docker
+    plan: free
+    numInstances: 1
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit
+    maxShutdownDelaySeconds: 300
+    envVars:
+      - key: APP_LOCAL_ONLY
+        value: "false"
+      - key: TRUST_PROXY_HEADERS
+        value: "true"
+      - key: DEMO_MODE
+        value: "true"

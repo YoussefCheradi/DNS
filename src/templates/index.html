@@ -11,14 +11,14 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='fast-domains.css') }}">
   <script src="{{ url_for('static', filename='fast-domains.js') }}" defer></script>
 </head>
-<body>
+<body data-demo="{{ 'true' if demo_mode else 'false' }}">
   <div class="page-shell">
     <header class="topbar">
       <a class="brand" href="/" aria-label="Fast Domain Name, accueil">
         <span class="brand-mark">FD</span>
         <span>Fast Domain Name</span>
       </a>
-      <div class="local-indicator"><span class="local-dot"></span> SESSION LOCALE</div>
+      <div class="local-indicator"><span class="local-dot"></span>{% if public_server %}SERVEUR PUBLIC{% else %}SESSION LOCALE{% endif %}</div>
     </header>
 
     <main>
@@ -26,7 +26,7 @@
         <div>
           <p class="eyebrow">RECHERCHE DE DOMAINES · EXPORT EXCEL</p>
           <h1 id="page-title">Trouvez votre prochain domaine.</h1>
-          <p class="intro-copy">Lancez la collecte, vérifiez les domaines et récupérez les résultats dans un seul classeur.</p>
+          <p class="intro-copy">{% if demo_mode %}Testez le parcours et le téléchargement avec un classeur d’exemple, sans recherche réelle.{% else %}Lancez la collecte, vérifiez les domaines et récupérez les résultats dans un seul classeur.{% endif %}</p>
         </div>
         <div class="output-tag" aria-label="Nom du fichier de sortie">
           <span class="output-kicker">FICHIER DE SORTIE</span>
@@ -50,6 +50,18 @@
             <div class="field-meta"><span>Exemples chargés depuis la liste du projet, modifiables.</span><span id="city-count">0 ville</span></div>
           </section>
 
+          {% if demo_mode %}
+          <section class="form-section">
+            <div class="section-heading">
+              <span class="step-number">02</span>
+              <div>
+                <h2>Mode simulation</h2>
+                <p>Aucun compte ni mot de passe n’est nécessaire.</p>
+              </div>
+            </div>
+            <p class="demo-notice">Le serveur crée un fichier de démonstration avec trois domaines fictifs. Aucun navigateur n’est lancé et aucun site externe n’est contacté.</p>
+          </section>
+          {% else %}
           <section class="form-section">
             <div class="section-heading">
               <span class="step-number">02</span>
@@ -107,12 +119,13 @@
               </label>
             </div>
           </section>
+          {% endif %}
 
           <div class="submit-row">
             <button id="submit-button" class="primary-button" type="submit">
-              <span>Lancer la recherche</span><span class="button-arrow" aria-hidden="true">→</span>
+              <span>{% if demo_mode %}Créer le fichier de démonstration{% else %}Lancer la recherche{% endif %}</span><span class="button-arrow" aria-hidden="true">→</span>
             </button>
-            <p>Chrome s’ouvrira sur cet ordinateur pendant les vérifications.</p>
+            <p>{% if demo_mode %}Les données du classeur sont fictives.{% else %}Chrome s’ouvrira sur le serveur pendant les vérifications.{% endif %}</p>
           </div>
           <div id="form-error" class="form-error" role="alert" hidden></div>
         </form>
@@ -120,7 +133,7 @@
         <aside class="status-panel" aria-label="État du traitement">
           <div class="status-topline"><span>ACTIVITÉ</span><span class="status-symbol" aria-hidden="true">◎</span></div>
           <h2 id="status-title">Prêt à chercher</h2>
-          <p id="status-description">Configurez vos villes et vos identifiants pour préparer un fichier Excel.</p>
+          <p id="status-description">{% if demo_mode %}Choisissez des villes pour générer le classeur d’exemple.{% else %}Configurez vos villes et vos identifiants pour préparer un fichier Excel.{% endif %}</p>
 
           <div class="progress-block">
             <div class="progress-label"><span>PROGRESSION</span><span id="progress-value">0%</span></div>
@@ -141,12 +154,12 @@
             <a id="download-link" class="download-button" href="#">Télécharger le fichier <span aria-hidden="true">↓</span></a>
           </div>
 
-          <p class="privacy-note"><span class="privacy-mark">●</span> Les identifiants ne sont pas enregistrés dans un fichier. Cette application accepte uniquement les connexions depuis cet ordinateur.</p>
+          <p class="privacy-note"><span class="privacy-mark">●</span>{% if demo_mode %}Aucun identifiant n’est demandé en mode simulation.{% elif public_server %}Connexion publique HTTPS ; les mots de passe sont transmis au job en mémoire et ne sont pas écrits dans un fichier.{% else %}Les identifiants ne sont pas enregistrés dans un fichier. Cette application accepte uniquement les connexions depuis cet ordinateur.{% endif %}</p>
         </aside>
       </div>
     </main>
 
-    <footer class="footer"><span>FAST DOMAIN NAME</span><span>RECHERCHE LOCALE · EXPORT .XLSX</span></footer>
+    <footer class="footer"><span>FAST DOMAIN NAME</span><span>{% if public_server %}SERVEUR · EXPORT .XLSX{% else %}RECHERCHE LOCALE · EXPORT .XLSX{% endif %}</span></footer>
   </div>
 </body>
 </html>

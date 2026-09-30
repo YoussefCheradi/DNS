@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+import os
 from pathlib import Path
 import random
 import shutil
@@ -9,6 +10,9 @@ import uuid
 
 import pandas as pd
 from flask import Flask, abort, jsonify, render_template, request, send_file
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from scrap_from_E_D.E_D import (
     init_driver as init_expired_domains_driver,
@@ -27,9 +31,17 @@ OUTPUT_FILENAME = "expired_domains_TLD_net.xlsx"
 MAX_CITIES = 50
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024
+LOCAL_ONLY = os.getenv("APP_LOCAL_ONLY", "true").lower() == "true"
+DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
+if os.getenv("TRUST_PROXY_HEADERS", "false").lower() == "true":
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
+limiter = Limiter(get_remote_address, app=app, default_limits=[], storage_uri="memory://")
 executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="domain-search")
 jobs = {}
 jobs_lock = threading.Lock()
+JOB_TTL_SECONDS = 60 * 60
 
 
 def _sample_cities(limit=10):
@@ -43,7 +55,7 @@ def _sample_cities(limit=10):
 
 @app.before_request
 def restrict_to_local_machine():
-    if request.remote_addr not in {"127.0.0.1", "::1"}:
+    if LOCAL_ONLY and request.remote_addr not in {"127.0.0.1", "::1"}:
         abort(403)
 
 
@@ -57,7 +69,17 @@ def add_security_headers(response):
 
 @app.get("/")
 def index():
-    return render_template("index.html", default_cities=_sample_cities())
+    return render_template(
+        "index.html",
+        default_cities=_sample_cities(),
+        demo_mode=DEMO_MODE,
+        public_server=not LOCAL_ONLY,
+    )
+
+
+@app.get("/healthz")
+def health_check():
+    return jsonify(status="ok")
 
 
 def _append_log(job_id, message):
@@ -80,6 +102,27 @@ def _set_stage(job_id, stage, progress, message=None):
         _append_log(job_id, message)
 
 
+def _cleanup_expired_jobs():
+    cutoff = time.time() - JOB_TTL_SECONDS
+    expired_paths = []
+
+    with jobs_lock:
+        expired_ids = [
+            job_id
+            for job_id, job in jobs.items()
+            if job["status"] not in {"queued", "running"}
+            and job.get("created_at", cutoff) < cutoff
+        ]
+        for job_id in expired_ids:
+            output_path = jobs[job_id].get("output_path")
+            if output_path:
+                expired_paths.append(Path(output_path).parent)
+            del jobs[job_id]
+
+    for path in expired_paths:
+        shutil.rmtree(path, ignore_errors=True)
+
+
 def _run_pipeline(job_id, cities, username, password, gmail_address, gmail_app_password, run_dns, run_google):
     driver = None
     job_dir = Path(tempfile.mkdtemp(prefix="fast_domain_name_"))
@@ -87,8 +130,43 @@ def _run_pipeline(job_id, cities, username, password, gmail_address, gmail_app_p
 
     try:
         _set_job(job_id, status="running")
+        if DEMO_MODE:
+            _set_stage(job_id, "Création du classeur de démonstration", 45, "Génération de données fictives, sans requête externe…")
+            sample_rows = [
+                {
+                    "City": cities[index % len(cities)],
+                    "Domain": domain,
+                    "Date Scraping from E_D": "DEMO",
+                    "Domaine .net": domain,
+                    "Status": "DEMO",
+                    "HTTP Code": code,
+                    "Resolved IP": ip,
+                    "Note": "DONNÉES FICTIVES — aucun contrôle réel effectué.",
+                    "Google Maps Pages": maps_pages,
+                    "Sponsored Results": sponsored,
+                }
+                for index, (domain, code, ip, maps_pages, sponsored) in enumerate([
+                    ("demo-plumbing.invalid", "200", "192.0.2.10", "3", "Oui"),
+                    ("demo-bakery.invalid", "301", "192.0.2.11", "1", "Non"),
+                    ("demo-repair.invalid", "—", "—", "0", "Non"),
+                ])
+            ]
+            pd.DataFrame(sample_rows).to_excel(output_path, index=False, engine="openpyxl")
+            _set_job(
+                job_id,
+                status="completed",
+                stage="Fichier de démonstration prêt",
+                progress=100,
+                row_count=len(sample_rows),
+                demo_mode=True,
+                output_path=str(output_path),
+                download_url=f"/api/jobs/{job_id}/download",
+            )
+            _append_log(job_id, "Simulation terminée. Les valeurs du fichier sont fictives.")
+            return
+
         _set_stage(job_id, "Connexion à ExpiredDomains", 4, "Démarrage de Chrome pour ExpiredDomains…")
-        driver, wait = init_expired_domains_driver()
+        driver, wait = init_expired_domains_driver(headless=True)
         login(
             driver,
             wait,
@@ -130,7 +208,7 @@ def _run_pipeline(job_id, cities, username, password, gmail_address, gmail_app_p
 
         if run_dns:
             try:
-                if not bulk_check_domains(str(output_path), auto_close=True):
+                if not bulk_check_domains(str(output_path), auto_close=True, headless=True):
                     _append_log(job_id, "SEO Web Checker n’a retourné aucune ligne ; le classeur collecté sera conservé.")
             except Exception as exc:
                 _append_log(job_id, f"SEO Web Checker indisponible : {exc}")
@@ -140,7 +218,7 @@ def _run_pipeline(job_id, cities, username, password, gmail_address, gmail_app_p
         if run_google:
             _set_stage(job_id, "Enrichissement Google et Maps", 78, "Recherche des indicateurs Google…")
             try:
-                enrich_with_google_data(str(output_path))
+                enrich_with_google_data(str(output_path), headless=True)
             except Exception as exc:
                 _append_log(job_id, f"Enrichissement Google interrompu : {exc}")
         else:
@@ -170,7 +248,9 @@ def _run_pipeline(job_id, cities, username, password, gmail_address, gmail_app_p
 
 
 @app.post("/api/jobs")
+@limiter.limit("5 per hour")
 def create_job():
+    _cleanup_expired_jobs()
     payload = request.get_json(silent=True) or request.form
     cities_text = str(payload.get("cities", ""))
     cities = list(dict.fromkeys(line.strip() for line in cities_text.splitlines() if line.strip()))
@@ -181,7 +261,7 @@ def create_job():
         return jsonify(error="Entrez au moins une ville."), 400
     if len(cities) > MAX_CITIES:
         return jsonify(error=f"La limite est de {MAX_CITIES} villes par traitement."), 400
-    if not username or not password:
+    if not DEMO_MODE and (not username or not password):
         return jsonify(error="Le nom d’utilisateur et le mot de passe ExpiredDomains sont requis."), 400
 
     with jobs_lock:
@@ -191,6 +271,7 @@ def create_job():
         job_id = uuid.uuid4().hex
         jobs[job_id] = {
             "id": job_id,
+            "created_at": time.time(),
             "status": "queued",
             "stage": "Dans la file d’attente",
             "progress": 0,
@@ -198,6 +279,7 @@ def create_job():
             "row_count": 0,
             "error": None,
             "download_url": None,
+            "demo_mode": DEMO_MODE,
         }
 
     executor.submit(
@@ -216,6 +298,7 @@ def create_job():
 
 @app.get("/api/jobs/<job_id>")
 def job_status(job_id):
+    _cleanup_expired_jobs()
     with jobs_lock:
         job = jobs.get(job_id)
         if not job:
@@ -226,6 +309,7 @@ def job_status(job_id):
 
 @app.get("/api/jobs/<job_id>/download")
 def download_job(job_id):
+    _cleanup_expired_jobs()
     with jobs_lock:
         job = jobs.get(job_id)
         if not job or job["status"] != "completed":
@@ -244,4 +328,4 @@ def download_job(job_id):
 
 if __name__ == "__main__":
     print("Fast Domain Name disponible sur http://127.0.0.1:5000")
-    app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False, threaded=True)
+    app.run(host="127.0.0.1" if LOCAL_ONLY else "0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=False, use_reloader=False, threaded=True)
