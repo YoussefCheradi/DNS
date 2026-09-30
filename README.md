@@ -94,9 +94,11 @@ python src/web_app.py
 
 Ouvrez ensuite [http://127.0.0.1:5000](http://127.0.0.1:5000). Entrez une ville par ligne, vos identifiants ExpiredDomains et, si la double authentification est activée, votre adresse Gmail et son mot de passe d’application. Les dix premières villes de `src/citys/us_cities_sample.xlsx` sont proposées par défaut ; vous pouvez les modifier. La limite est de 50 villes par recherche.
 
-Choisissez ensuite les analyses SEO Web Checker et Google/Maps à exécuter. La page suit le traitement et affiche le lien de téléchargement quand `expired_domains_TLD_net.xlsx` est prêt. Chrome s’ouvre sur la machine locale pendant les vérifications. Un seul traitement peut tourner à la fois.
+Choisissez ensuite les analyses SEO Web Checker et Google/Maps à exécuter. La page suit le traitement et affiche un lien de téléchargement quand le classeur `expired_domains_TLD_net.xlsx` est prêt. Chaque traitement web travaille dans son propre dossier temporaire : il ne remplace pas le classeur `expired_domains_TLD_net.xlsx` situé à la racine du projet. Chrome s’ouvre sur la machine locale pendant les vérifications. Un seul traitement peut tourner à la fois.
 
-L’application écoute uniquement sur `127.0.0.1` et n’est pas configurée pour être exposée sur Internet. Les identifiants sont transmis au processus local pour le traitement et ne sont pas écrits dans un fichier. Si la récupération automatique du code de vérification Gmail échoue, le traitement s’arrête avec une erreur au lieu d’attendre une saisie dans le terminal.
+L’application écoute uniquement sur `127.0.0.1` et n’est pas configurée pour être exposée sur Internet. Les identifiants sont transmis au processus local pour le traitement et ne sont pas écrits dans un fichier ; les champs de mot de passe sont effacés du formulaire après le démarrage du traitement. Si la récupération automatique du code de vérification Gmail échoue, le traitement s’arrête avec une erreur au lieu d’attendre une saisie dans le terminal.
+
+Les états des traitements sont conservés en mémoire : le téléchargement est disponible tant que le serveur est lancé. Un redémarrage du serveur efface les liens de téléchargement affichés dans l’application. Les erreurs SEO Web Checker et Google/Maps sont consignées comme avertissements ; si la collecte initiale a produit un classeur, celui-ci reste téléchargeable même si une analyse optionnelle a échoué.
 
 ### Enrichissement Google en ligne de commande
 
@@ -144,7 +146,7 @@ python coordonner.py
 
 ## Classeur Excel
 
-Le fichier principal est `expired_domains_TLD_net.xlsx`, à la racine. Pour le vérificateur SEO, la colonne de domaine reconnue est `Domaine .net`, avec `Domain` comme solution de repli. Pour l’enrichissement Google, le nom requis est `Domain`.
+Les scripts en ligne de commande utilisent par défaut le fichier `expired_domains_TLD_net.xlsx` à la racine. L’application web crée au contraire un fichier séparé par traitement dans le dossier temporaire du système ; le navigateur le télécharge sous le nom `expired_domains_TLD_net.xlsx`. Pour le vérificateur SEO, la colonne de domaine reconnue est `Domaine .net`, avec `Domain` comme solution de repli. Pour l’enrichissement Google, le nom requis est `Domain`.
 
 Colonnes utilisées ou ajoutées par les scripts :
 
