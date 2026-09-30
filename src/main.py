@@ -24,30 +24,30 @@ GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
 # SCRAPING EXPIRED DOMAINS
 # ======================
 
-df_cities = pd.read_excel(CITYS_PATH)
-cities = df_cities.iloc[:10, 0].dropna().tolist()
-print(f"Villes chargées : {cities}")
+# df_cities = pd.read_excel(CITYS_PATH)
+# cities = df_cities.iloc[:50, 0].dropna().tolist()
+# print(f"Villes chargées : {cities}")
 
-driver, wait = init_driver()
-login(driver, wait, USERNAME, PASSWORD, GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-setup_filters(driver, wait)
+# driver, wait = init_driver()
+# login(driver, wait, USERNAME, PASSWORD, GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+# setup_filters(driver, wait)
 
-all_data = []
-for city in cities:
-    city_data = scrape_city(driver, wait, city)
-    all_data.extend(city_data)
-    time.sleep(random.uniform(2, 4))
+# all_data = []
+# for city in cities:
+#     city_data = scrape_city(driver, wait, city)
+#     all_data.extend(city_data)
+#     time.sleep(random.uniform(2, 4))
 
-save_to_excel(all_data, str(EXCEL_PATH))
-driver.quit()
+# save_to_excel(all_data, str(EXCEL_PATH))
+# driver.quit()
 
 
 # ======================
 # DNS CHECKER
 # ======================
 
-print("\n🔍 DNS Checker (SEO Web Checker)...")
-bulk_check_domains(str(EXCEL_PATH), auto_close=True)
+# print("\n🔍 DNS Checker (SEO Web Checker)...")
+# bulk_check_domains(str(EXCEL_PATH), auto_close=True)
 
 
 # # ======================

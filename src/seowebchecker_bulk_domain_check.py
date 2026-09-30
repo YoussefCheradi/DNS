@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
@@ -11,6 +12,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+RESULTS_TIMEOUT_SECONDS = 300
 
 
 def find_excel_file() -> Path:
@@ -115,11 +117,25 @@ def init_driver():
     return driver, wait
 
 
-def extract_results_table(driver, wait):
-    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "table.results-table tbody tr")))
-    time.sleep(2)
+def extract_results_table(driver, expected_count):
+    rows_selector = "table.results-table tbody tr"
+    try:
+        WebDriverWait(driver, RESULTS_TIMEOUT_SECONDS).until(
+            lambda current_driver: len(
+                current_driver.find_elements(By.CSS_SELECTOR, rows_selector)
+            ) >= expected_count
+        )
+    except TimeoutException as exc:
+        actual_count = len(driver.find_elements(By.CSS_SELECTOR, rows_selector))
+        page_text = driver.find_element(By.TAG_NAME, "body").text[:1000]
+        raise TimeoutException(
+            f"Expected {expected_count} results rows, but found {actual_count} "
+            f"within {RESULTS_TIMEOUT_SECONDS} seconds. "
+            f"Page title: {driver.title!r}; URL: {driver.current_url}; "
+            f"Page text: {page_text!r}"
+        ) from exc
 
-    rows = driver.find_elements(By.CSS_SELECTOR, "table.results-table tbody tr")
+    rows = driver.find_elements(By.CSS_SELECTOR, rows_selector)
     result_rows = []
 
     for row in rows:
@@ -185,7 +201,7 @@ def bulk_check_domains(file_path: str | Path | None = None, auto_close: bool = F
         print("✅ Bouton 'Check Domains' cliqué.")
         print("Le site traite maintenant les domaines envoyés.")
 
-        rows = extract_results_table(driver, wait)
+        rows = extract_results_table(driver, len(domains))
         df_results = pd.DataFrame(rows)
 
         raw_results_path = PROJECT_ROOT / "dns_checker_results.xlsx"

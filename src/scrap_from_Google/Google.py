@@ -29,10 +29,9 @@ def init_driver():
     options.add_argument(r"--user-data-dir=C:\ChromeTemp")
     options.add_argument("--profile-directory=Default")
 
-    try:
-        driver = uc.Chrome(options=options, use_subprocess=True)
-    except Exception:
-        driver = uc.Chrome(options=options, use_subprocess=True, version_main=154)
+    print("  -> Initialisation Chrome 154...", flush=True)
+    driver = uc.Chrome(options=options, use_subprocess=True, version_main=154)
+    print("  -> Chrome prêt", flush=True)
 
     wait = WebDriverWait(driver, 15)
     return driver, wait
@@ -267,7 +266,7 @@ def enrich_with_google_data(filepath="expired_domains_TLD_net.xlsx"):
 
     valid_mask = pd.Series(True, index=df.index)
     if "HTTP Code" in df.columns:
-        valid_mask = df["HTTP Code"].fillna("").astype(str).str.strip().isin(["200", "301", "302"])
+        valid_mask = df["HTTP Code"].fillna("").astype(str).str.strip().isin(["200", "301", "302", "405"])
         valid_count = int(valid_mask.sum())
         print(f"  -> {valid_count} domaines conserves pour Google (HTTP Code 200/301/302 sur {len(df)})")
         if valid_count == 0:
