@@ -4,6 +4,7 @@ import random
 import pandas as pd
 import os
 from pathlib import Path
+from typing import Callable
 from dotenv import load_dotenv
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
@@ -237,16 +238,22 @@ def get_more_businesses_pages(driver, wait, query):
 # FONCTION PRINCIPALE
 # ======================
 
-def enrich_with_google_data(filepath="expired_domains_TLD_net.xlsx"):
+def enrich_with_google_data(
+    filepath="expired_domains_TLD_net_final.xlsx",
+    domains=None,
+    progress_callback: Callable[[str], None] | None = None,
+    cancel_check: Callable[[], None] | None = None,
+    target_tld: str | None = None,
+):
     project_root = Path(__file__).resolve().parents[2]
-    target_path = project_root / "expired_domains_TLD_net.xlsx"
+    target_path = project_root / "expired_domains_TLD_net_final.xlsx"
 
     if filepath:
         custom_path = Path(filepath).expanduser()
         if custom_path.is_absolute():
             target_path = custom_path
         elif custom_path.name.lower() == "expired_domains.xlsx":
-            target_path = project_root / "expired_domains_TLD_net.xlsx"
+            target_path = project_root / "expired_domains_TLD_net_final.xlsx"
         else:
             target_path = project_root / custom_path.name
 
@@ -254,9 +261,11 @@ def enrich_with_google_data(filepath="expired_domains_TLD_net.xlsx"):
 
     if not os.path.exists(filepath):
         print(f"  -> Fichier introuvable : {filepath}")
-        print("  -> Vérifie que le scraping a bien généré expired_domains_TLD_net.xlsx avant de lancer l'enrichissement Google.")
+        print("  -> Vérifie que le scraping a bien généré expired_domains_TLD_net_final.xlsx avant de lancer l'enrichissement Google.")
         return
 
+    if cancel_check is not None:
+        cancel_check()
     df = pd.read_excel(filepath, engine="openpyxl")
     print(f"  -> {len(df)} domaines charges")
 
@@ -264,19 +273,22 @@ def enrich_with_google_data(filepath="expired_domains_TLD_net.xlsx"):
         print("Colonne Domain introuvable.")
         return
 
-    valid_mask = pd.Series(True, index=df.index)
-    if "HTTP Code" in df.columns:
-        valid_mask = df["HTTP Code"].fillna("").astype(str).str.strip().isin(["200", "301", "302", "405"])
-        valid_count = int(valid_mask.sum())
-        print(f"  -> {valid_count} domaines conserves pour Google (HTTP Code 200/301/302 sur {len(df)})")
-        if valid_count == 0:
-            print("  -> Aucun domaine ne correspond au filtre HTTP Code 200/301/302. Google search non lance.")
-            return
-    else:
-        print("  -> Colonne HTTP Code absente : Google search applique sur tous les domaines.")
+    print(f"  -> {len(df)} domaines conserves pour Google, tous codes HTTP inclus")
 
-    if "Domaine .net" not in df.columns:
-        df["Domaine .net"] = df["Domain"].map(lambda d: re.sub(r'\.com$', '.net', str(d), flags=re.IGNORECASE) if str(d).strip() else d)
+    target_column = f"Domaine {target_tld}" if target_tld else None
+    if target_column and target_column not in df.columns:
+        df[target_column] = df["Domain"].map(
+            lambda domain: re.sub(r"\.[^.]+$", target_tld, str(domain), flags=re.IGNORECASE)
+            if str(domain).strip()
+            else domain
+        )
+    elif not target_tld and "Domaine .net" not in df.columns:
+        df["Domaine .net"] = df["Domain"].map(
+            lambda domain: re.sub(r"\.com$", ".net", str(domain), flags=re.IGNORECASE)
+            if str(domain).strip()
+            else domain
+        )
+    search_column = target_column if target_column and target_column in df.columns else "Domain"
 
     if "Google All Pages" in df.columns:
         df.drop(columns=["Google All Pages"], inplace=True)
@@ -285,15 +297,35 @@ def enrich_with_google_data(filepath="expired_domains_TLD_net.xlsx"):
         df["Google Maps Pages"] = None
     if "Sponsored Results" not in df.columns:
         df["Sponsored Results"] = None
+    df["Google Maps Pages"] = df["Google Maps Pages"].astype("object")
+    df["Sponsored Results"] = df["Sponsored Results"].astype("object")
 
-    rows_to_process = df.loc[valid_mask].copy()
+    rows_to_process = df.copy()
+    if domains is not None:
+        requested_domains = {
+            str(domain).strip().lower().rstrip(".")
+            for domain in domains
+            if str(domain).strip()
+        }
+        rows_to_process = rows_to_process.loc[
+            rows_to_process[search_column].map(
+                lambda domain: str(domain).strip().lower().rstrip(".")
+            ).isin(requested_domains)
+        ]
+
+    print(f"  -> {len(rows_to_process)} nouveaux domaines à rechercher sur Google")
+    if rows_to_process.empty:
+        return
 
     print(f"  -> Lancement Chrome...")
     driver, wait = init_driver()
+    processed_count = 0
 
     try:
         for idx, row in rows_to_process.iterrows():
-            domain = str(row["Domain"]).strip()
+            if cancel_check is not None:
+                cancel_check()
+            domain = str(row[search_column]).strip()
 
             maps_val = df.at[idx, "Google Maps Pages"]
             sponsored_val = df.at[idx, "Sponsored Results"]
@@ -332,12 +364,24 @@ def enrich_with_google_data(filepath="expired_domains_TLD_net.xlsx"):
                 df.at[idx, "Sponsored Results"] = sponsored
             df.to_excel(filepath, index=False, engine="openpyxl")
 
+            result_message = (
+                f"Google · {domain} : {df.at[idx, 'Google Maps Pages']} page(s) Maps ; "
+                f"résultats sponsorisés : {df.at[idx, 'Sponsored Results']}."
+            )
+            print(result_message)
+            if progress_callback is not None:
+                progress_callback(result_message)
+            processed_count += 1
+            if cancel_check is not None:
+                cancel_check()
+
             delay = random.uniform(5, 15)
             print(f"  -> Attente {delay:.1f}s avant prochain domaine...")
             time.sleep(delay)
 
     except Exception as e:
         print(f"\nErreur generale : {e}")
+        raise
 
     finally:
         try:
@@ -345,4 +389,5 @@ def enrich_with_google_data(filepath="expired_domains_TLD_net.xlsx"):
         except:
             pass
         df.to_excel(filepath, index=False, engine="openpyxl")
-        print(f"\nFichier mis a jour -> {filepath}")
+        print(f"\nGoogle : {processed_count}/{len(rows_to_process)} domaine(s) traité(s).")
+        print(f"Fichier mis a jour -> {filepath}")

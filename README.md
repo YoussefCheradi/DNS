@@ -23,7 +23,7 @@ Le pipeline envisagé comporte trois étapes :
 2. **SEO Web Checker** : envoyer les domaines au vérificateur en ligne pour obtenir le statut, le code HTTP, l’adresse IP résolue et une note.
 3. **Google et Google Maps** : rechercher les domaines avec un navigateur Chrome et compléter le classeur avec `Sponsored Results` et `Google Maps Pages`.
 
-L’application web peut lancer les trois étapes à la suite. Le point d’entrée historique `src/main.py`, lui, ne lance actuellement que l’étape 3. Cet enrichissement filtre les lignes dont `HTTP Code` vaut `200`, `301`, `302` ou `405` lorsque cette colonne existe. Les lignes déjà renseignées pour les deux champs Google sont ignorées. Le classeur est sauvegardé après chaque domaine traité.
+L’application web peut lancer les trois étapes à la suite. Le point d’entrée historique `src/main.py`, lui, ne lance actuellement que l’étape 3. L’enrichissement Google traite les domaines quel que soit leur code HTTP. Les lignes déjà renseignées pour les deux champs Google sont ignorées. Le classeur est sauvegardé après chaque domaine traité.
 
 ## Structure
 
@@ -41,7 +41,7 @@ L’application web peut lancer les trois étapes à la suite. Le point d’entr
 | `src/citys/us_cities_sample.xlsx` | Liste de villes utilisée par le scraper ExpiredDomains. Le bloc de `main.py`, s’il est activé, lit les 50 premières lignes. |
 | `coordonner.py` | Petit utilitaire qui affiche les coordonnées de la souris après cinq secondes. |
 | `solver_button.png` | Image utilisée par l’assistance CAPTCHA de `Google.py`. |
-| `expired_domains_TLD_net.xlsx` | Classeur principal utilisé par défaut. |
+| `expired_domains_TLD_net_final.xlsx` | Classeur principal local, enrichi avec les nouveaux domaines et proposé au téléchargement. |
 
 ## Prérequis
 
@@ -86,15 +86,22 @@ Toutes les commandes ci-dessous sont à lancer depuis la racine du dépôt.
 
 ### Application web
 
-Lancez le serveur local :
+Lancez le serveur local une fois :
 
 ```powershell
 python src/web_app.py
 ```
 
-Ouvrez ensuite [http://127.0.0.1:5000](http://127.0.0.1:5000). Entrez une ville par ligne, vos identifiants ExpiredDomains et, si la double authentification est activée, votre adresse Gmail et son mot de passe d’application. Les dix premières villes de `src/citys/us_cities_sample.xlsx` sont proposées par défaut ; vous pouvez les modifier. La limite est de 50 villes par recherche.
+Avant la première recherche Google, préparez le profil Chrome utilisé par l’application :
 
-Choisissez ensuite les analyses SEO Web Checker et Google/Maps à exécuter. La page suit le traitement et affiche un lien de téléchargement quand le classeur `expired_domains_TLD_net.xlsx` est prêt. Chaque traitement web travaille dans son propre dossier temporaire : il ne remplace pas le classeur `expired_domains_TLD_net.xlsx` situé à la racine du projet. Chrome s’ouvre sur la machine locale pendant les vérifications. Un seul traitement peut tourner à la fois.
+1. Installez l’extension Chrome **Buster: Captcha Solver for Humans** dans le profil `C:\ChromeTemp\Default` utilisé par le scraper Google. Une extension installée uniquement dans votre profil Chrome habituel peut ne pas être présente dans ce profil d’automatisation.
+2. Ouvrez [les préférences de recherche Google](https://www.google.com/preferences?hl=en&lang=1&prev=https://www.google.com/preferences?hl%3Den), puis réglez **Region Settings** sur **United States (USA)** ou sur la région de votre choix. Enregistrez les préférences.
+
+Ouvrez ensuite [http://127.0.0.1:5000](http://127.0.0.1:5000). Le serveur de développement redémarre automatiquement après une modification du code Python ; les templates et les fichiers CSS/JavaScript sont servis sans cache. Actualisez la page du navigateur pour afficher les changements visuels. Choisissez « Rechercher par ville » pour la collecte habituelle, puis sélectionnez les États-Unis (`src/citys/us_cities_sample.xlsx`) ou le Canada (`src/citys/villes_canada.xlsx`). La liste des villes et les positions de l’intervalle sont actualisées selon le pays. Vous pouvez saisir des villes manuellement, choisir un intervalle inclusif à partir de la position 1, ou cocher « Scanner toutes les villes ». Les dix premières villes du pays choisi sont proposées par défaut. Renseignez les identifiants ExpiredDomains et, si nécessaire, Gmail pour cette collecte.
+
+Choisissez « Analyser un Excel » pour importer un classeur `.xlsx` de 30 Mo maximum contenant une colonne `Domain` ou `Domaine .net`. Sélectionnez soit « Statut DNS et HTTP », soit « Google et Maps » ; l’application analyse le classeur importé sans lancer la collecte de villes et propose le fichier enrichi au téléchargement. L’import est traité dans un dossier temporaire local et n’écrase pas le classeur principal du projet.
+
+Choisissez ensuite les analyses SEO Web Checker et Google/Maps à exécuter. Le champ TLD accepte par exemple `.net`, `.us`, `.com` ou `.co.uk`. Le filtre « Name in TLD is registered » d’ExpiredDomains reçoit ce TLD, puis les domaines correspondants sont ajoutés au classeur et envoyés aux analyses sélectionnées. Chaque TLD possède son propre classeur : `.net` utilise `expired_domains_TLD_net_final.xlsx`, `.us` utilise `expired_domains_TLD_us_final.xlsx`, et ainsi de suite. La page affiche un lien de téléchargement pour le classeur choisi. Vous pouvez annuler un traitement actif ; les domaines déjà collectés sont enregistrés. En cas d’erreur, vous pouvez reprendre à la dernière étape acquise, annuler/clôturer le processus ou le redémarrer depuis le début. La reprise conserve les villes et domaines déjà traités ; pendant la collecte, une ville interrompue avant sa fin est relancée en entier. Un redémarrage ne supprime pas les classeurs et réanalyse aussi les nouveaux domaines de la tentative échouée. Les points de reprise sont gardés en mémoire et sont perdus si le serveur est redémarré. Chrome s’ouvre sur la machine locale pendant les vérifications. Un seul traitement peut tourner à la fois.
 
 L’application écoute uniquement sur `127.0.0.1` et n’est pas configurée pour être exposée sur Internet. Les identifiants sont transmis au processus local pour le traitement et ne sont pas écrits dans un fichier ; les champs de mot de passe sont effacés du formulaire après le démarrage du traitement. Si la récupération automatique du code de vérification Gmail échoue, le traitement s’arrête avec une erreur au lieu d’attendre une saisie dans le terminal.
 
@@ -102,7 +109,7 @@ Les états des traitements sont conservés en mémoire : le téléchargement est
 
 ### Enrichissement Google en ligne de commande
 
-Vérifiez que `expired_domains_TLD_net.xlsx` existe et contient une colonne `Domain`. Puis lancez :
+Le classeur `expired_domains_TLD_net_final.xlsx` contient les résultats. Lancez le pipeline avec :
 
 ```powershell
 python src/main.py
@@ -131,7 +138,7 @@ L’ordre prévu est : collecte ExpiredDomains, vérification SEO Web Checker, p
 `Google2.py` n’est pas utilisée par `main.py`. Elle nécessite `SERPER_API_KEY` dans `.env` et ajoute `Google All Pages` ainsi que `Google Maps Pages` au fichier fourni. Depuis la racine :
 
 ```powershell
-python -c "import sys; sys.path.insert(0, 'src'); from scrap_from_Google.Google2 import enrich_with_google_data; enrich_with_google_data('expired_domains_TLD_net.xlsx')"
+python -c "import sys; sys.path.insert(0, 'src'); from scrap_from_Google.Google2 import enrich_with_google_data; enrich_with_google_data('expired_domains_TLD_net_final.xlsx')"
 ```
 
 L’utilisation de l’API dépend des quotas et conditions de votre compte Serper.
@@ -146,7 +153,7 @@ python coordonner.py
 
 ## Classeur Excel
 
-Les scripts en ligne de commande utilisent par défaut le fichier `expired_domains_TLD_net.xlsx` à la racine. L’application web crée au contraire un fichier séparé par traitement dans le dossier temporaire du système ; le navigateur le télécharge sous le nom `expired_domains_TLD_net.xlsx`. Pour le vérificateur SEO, la colonne de domaine reconnue est `Domaine .net`, avec `Domain` comme solution de repli. Pour l’enrichissement Google, le nom requis est `Domain`.
+Les scripts en ligne de commande et l’application web utilisent le fichier `expired_domains_TLD_net_final.xlsx` à la racine. Les domaines déjà présents ne sont pas ajoutés une seconde fois ; les recherches SEO et Google ne portent que sur les nouveaux domaines de la collecte courante. Le classeur complet mis à jour est téléchargeable depuis l’application web. Pour le vérificateur SEO, la colonne de domaine reconnue est `Domaine .net`, avec `Domain` comme solution de repli. Pour l’enrichissement Google, le nom requis est `Domain`.
 
 Colonnes utilisées ou ajoutées par les scripts :
 

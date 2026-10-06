@@ -6,6 +6,7 @@ import email
 import re
 import os
 from pathlib import Path
+from typing import Callable
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
@@ -16,12 +17,34 @@ from datetime import datetime
 
 
 def domain_to_net(domain):
+    return domain_to_tld(domain, ".net")
+
+
+def normalize_tld(tld):
+    if not isinstance(tld, str) or not tld.strip():
+        raise ValueError("Indiquez un TLD valide, par exemple .net, .us ou .co.uk.")
+    value = str(tld).strip().lower()
+    if not value.startswith("."):
+        value = f".{value}"
+    labels = value[1:].split(".")
+    if len(value) > 253 or not labels or any(
+        not label
+        or len(label) > 63
+        or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label)
+        for label in labels
+    ):
+        raise ValueError("Indiquez un TLD valide, par exemple .net, .us ou .co.uk.")
+    return value
+
+
+def domain_to_tld(domain, tld=".net"):
     if pd.isna(domain):
         return domain
     value = str(domain).strip()
     if not value:
         return value
-    return re.sub(r'\.com$', '.net', value, flags=re.IGNORECASE)
+    target_tld = normalize_tld(tld)
+    return re.sub(r"\.[^.]+$", target_tld, value, flags=re.IGNORECASE)
 
 
 def get_verification_code_from_gmail(gmail_address, app_password, retries=5, delay=10):
@@ -118,7 +141,8 @@ def login(driver, wait, username, password, gmail_address, gmail_app_password, a
         print("✅ Pas de vérification requise, connexion directe")
 
 
-def setup_filters(driver, wait):
+def setup_filters(driver, wait, tld=".net"):
+    target_tld = normalize_tld(tld)
     driver.get("https://member.expireddomains.net/domains/expiredcom/")
     time.sleep(2)
 
@@ -162,9 +186,21 @@ def setup_filters(driver, wait):
     driver.execute_script("arguments[0].click();", additional_tab)
     time.sleep(1)
 
-    TLD_box = wait.until(EC.presence_of_element_located((By.ID, "fstatusnetnot")))
-    if not TLD_box.is_selected():
-        driver.execute_script("arguments[0].click();", TLD_box)
+    tld_input = wait.until(EC.presence_of_element_located((By.NAME, "ftldreg")))
+    driver.execute_script(
+        """
+        const field = arguments[0];
+        field.value = arguments[1];
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+        field.dispatchEvent(new Event("change", { bubbles: true }));
+        """,
+        tld_input,
+        target_tld,
+    )
+
+    net_status_box = wait.until(EC.presence_of_element_located((By.ID, "fstatusnetnot")))
+    if net_status_box.is_selected():
+        driver.execute_script("arguments[0].click();", net_status_box)
 
     # SEO Tab
     seo_tab = wait.until(EC.presence_of_element_located((By.XPATH, "//a[@data-target='#seo']")))
@@ -180,7 +216,16 @@ def setup_filters(driver, wait):
     print("✅ Filtres configurés")
 
 
-def scrape_city(driver, wait, city):
+def scrape_city(
+    driver,
+    wait,
+    city,
+    cancel_check=None,
+    progress_callback: Callable[[str], None] | None = None,
+):
+    if cancel_check is not None:
+        cancel_check()
+
     print(f"\n{'='*40}")
     print(f"Recherche pour la ville : {city}")
     print(f"{'='*40}")
@@ -206,7 +251,7 @@ def scrape_city(driver, wait, city):
     domain_input = wait.until(EC.presence_of_element_located((By.NAME, "fdomainand")))
     driver.execute_script("arguments[0].scrollIntoView(true);", domain_input)
     driver.execute_script("arguments[0].value = '';", domain_input)
-    driver.execute_script(f"arguments[0].value = '{city}';", domain_input)
+    driver.execute_script("arguments[0].value = arguments[1];", domain_input, city)
     time.sleep(1)
 
     # Appliquer le filtre
@@ -217,6 +262,8 @@ def scrape_city(driver, wait, city):
     city_data = []
 
     for page in range(5):
+        if cancel_check is not None:
+            cancel_check()
         print(f"  Page {page + 1}...")
 
         try:
@@ -226,19 +273,31 @@ def scrape_city(driver, wait, city):
             break
 
         rows = driver.find_elements(By.CSS_SELECTOR, "table.base1 tbody tr")
+        page_domain_count = 0
 
         for row in rows:
             domain_els = row.find_elements(By.CSS_SELECTOR, "td.field_domain a")
             if domain_els:
                 domain = domain_els[0].text.strip()
                 if domain:
+                    page_domain_count += 1
                     city_data.append({
                         "City": city,
                         "Domain": domain,
                         "Date Scraping from E_D": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     })
 
-        print(f"  → {len(city_data)} domaines pour {city} jusqu'ici")
+        page_message = (
+            f"ExpiredDomains · {city} · page {page + 1} : "
+            f"{page_domain_count} domaine(s) trouvé(s), "
+            f"{len(city_data)} au total pour cette ville."
+        )
+        print(f"  {page_message}")
+        if progress_callback is not None:
+            progress_callback(page_message)
+
+        if cancel_check is not None:
+            cancel_check()
 
         try:
             next_btn = driver.find_elements(By.LINK_TEXT, "Next Page")
@@ -254,48 +313,107 @@ def scrape_city(driver, wait, city):
             print(f"  Erreur pagination : {e}")
             break
 
-    print(f"  ✅ {len(city_data)} domaines trouvés pour {city}")
+    city_message = f"ExpiredDomains · {city} : {len(city_data)} domaine(s) trouvé(s) au total."
+    print(f"  {city_message}")
+    if progress_callback is not None:
+        progress_callback(city_message)
     return city_data
 
 
-def save_to_excel(all_data, filepath="expired_domains_TLD_net.xlsx"):
+def save_to_excel(all_data, filepath="expired_domains_TLD_net_final.xlsx", tld=".net"):
+    target_tld = normalize_tld(tld)
+    target_column = f"Domaine {target_tld}"
     filepath = str(Path(filepath).expanduser()) if not os.path.isabs(filepath) else filepath
     if not os.path.isabs(filepath):
         filepath = str(Path(__file__).resolve().parents[2] / filepath)
     df_new = pd.DataFrame(all_data)
 
     if df_new.empty:
-        print("\n⚠️  Aucune donnée collectée.")
-        return
+        print("Collecte terminée : 0 domaine trouvé, 0 nouveau, 0 doublon.")
+        return {
+            "collected_count": 0,
+            "new_domains": [],
+            "existing_duplicates": 0,
+            "batch_duplicates": 0,
+        }
 
-    if "Domain" in df_new.columns and "Domaine .net" not in df_new.columns:
-        df_new["Domaine .net"] = df_new["Domain"].map(domain_to_net)
+    if "Domain" not in df_new.columns:
+        raise ValueError("La colonne 'Domain' est absente des domaines collectés.")
 
-    try:
-        if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-            df_existing = pd.read_excel(filepath, engine="openpyxl")
-            if "Domaine .net" not in df_existing.columns and "Domain" in df_existing.columns:
-                df_existing["Domaine .net"] = df_existing["Domain"].map(domain_to_net)
-            df_final = pd.concat([df_existing, df_new], ignore_index=True)
-            print(f"  → {len(df_existing)} lignes existantes + {len(df_new)} nouvelles")
-        else:
-            raise FileNotFoundError
-    except (FileNotFoundError, ValueError):
-        df_final = df_new
-        print("  → Nouveau fichier créé")
+    if "Domain" in df_new.columns and target_column not in df_new.columns:
+        df_new[target_column] = df_new["Domain"].map(lambda domain: domain_to_tld(domain, target_tld))
 
-    # Trouver les doublons avant suppression
-    duplicated_mask = df_final.duplicated(subset=["Domain"], keep="first")
-    duplicated_domains = df_final[duplicated_mask]["Domain"].tolist()
-
-    if duplicated_domains:
-        print(f"  → {len(duplicated_domains)} doublons supprimés :")
-        for d in duplicated_domains:
-            print(f"      - {d}")
+    if os.path.exists(filepath):
+        df_existing = pd.read_excel(filepath, engine="openpyxl")
+        if "Domain" not in df_existing.columns:
+            raise ValueError(f"La colonne 'Domain' est absente du classeur existant : {filepath}")
+        if target_column not in df_existing.columns:
+            df_existing[target_column] = df_existing["Domain"].map(
+                lambda domain: domain_to_tld(domain, target_tld)
+            )
     else:
-        print(f"  → Aucun doublon détecté")
+        df_existing = pd.DataFrame()
 
-    df_final = df_final[~duplicated_mask]
+    def normalized_domain(value):
+        if pd.isna(value):
+            return ""
+        return str(value).strip().lower().rstrip(".")
 
+    existing_domains = {
+        normalized_domain(domain)
+        for domain in df_existing["Domain"]
+    } if not df_existing.empty else set()
+    df_new["__domain_key"] = df_new["Domain"].map(normalized_domain)
+    seen_new_domains = set()
+    new_row_indices = []
+    new_domains = []
+    existing_duplicates = 0
+    batch_duplicates = 0
+
+    for index, row in df_new.iterrows():
+        domain_key = row["__domain_key"]
+        if not domain_key:
+            continue
+        if domain_key in existing_domains:
+            existing_duplicates += 1
+        elif domain_key in seen_new_domains:
+            batch_duplicates += 1
+        else:
+            seen_new_domains.add(domain_key)
+            new_row_indices.append(index)
+            new_domains.append(str(row[target_column]).strip())
+
+    collected_count = int(df_new["__domain_key"].ne("").sum())
+    df_new = df_new.loc[new_row_indices]
+    df_new = df_new.drop(columns=["__domain_key"])
+
+    duplicate_count = existing_duplicates + batch_duplicates
+    collected_label = "domaine trouvé" if collected_count == 1 else "domaines trouvés"
+    new_label = "nouveau domaine" if len(new_domains) == 1 else "nouveaux domaines"
+    duplicate_label = "doublon" if duplicate_count == 1 else "doublons"
+    print(
+        f"Collecte terminée : {collected_count} {collected_label}, "
+        f"{len(new_domains)} {new_label}, {duplicate_count} {duplicate_label} "
+        f"({existing_duplicates} déjà présents, {batch_duplicates} répétés dans la collecte)."
+    )
+
+    if not new_domains:
+        return {
+            "collected_count": collected_count,
+            "new_domains": [],
+            "existing_duplicates": existing_duplicates,
+            "batch_duplicates": batch_duplicates,
+        }
+
+    df_final = pd.concat([df_existing, df_new], ignore_index=True)
+    print(f"Classeur : {len(df_existing)} domaines déjà enregistrés + {len(new_domains)} nouveaux.")
+
+    Path(filepath).parent.mkdir(parents=True, exist_ok=True)
     df_final.to_excel(filepath, index=False, engine="openpyxl")
-    print(f"\n✅ Excel mis à jour avec {len(df_final)} domaines au total → {filepath}")
+    print(f"\nExcel mis à jour avec {len(df_final)} domaines au total -> {filepath}")
+    return {
+        "collected_count": collected_count,
+        "new_domains": new_domains,
+        "existing_duplicates": existing_duplicates,
+        "batch_duplicates": batch_duplicates,
+    }

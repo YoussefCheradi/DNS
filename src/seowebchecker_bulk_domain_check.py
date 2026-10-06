@@ -16,13 +16,21 @@ RESULTS_TIMEOUT_SECONDS = 300
 
 
 def find_excel_file() -> Path:
-    preferred = PROJECT_ROOT / "expired_domains_TLD_net.xlsx"
+    preferred = PROJECT_ROOT / "expired_domains_TLD_net_final.xlsx"
     if preferred.exists():
         return preferred
+
+    legacy_preferred = PROJECT_ROOT / "expired_domains_TLD_net.xlsx"
+    if legacy_preferred.exists():
+        return legacy_preferred
 
     legacy = PROJECT_ROOT / "expired_domains.xlsx"
     if legacy.exists():
         return legacy
+
+    src_final = PROJECT_ROOT / "src" / "expired_domains_TLD_net_final.xlsx"
+    if src_final.exists():
+        return src_final
 
     src_preferred = PROJECT_ROOT / "src" / "expired_domains_TLD_net.xlsx"
     if src_preferred.exists():
@@ -35,15 +43,27 @@ def find_excel_file() -> Path:
     return preferred
 
 
-def get_domains_from_excel(file_path: Path):
+def get_domains_from_excel(
+    file_path: Path,
+    domains: list[str] | None = None,
+    target_tld: str | None = None,
+):
     df = pd.read_excel(file_path, engine="openpyxl")
 
-    if "Domaine .net" in df.columns:
+    target_column = f"Domaine {target_tld}" if target_tld else None
+    if target_column and target_column in df.columns:
+        col_name = target_column
+    elif "Domaine .net" in df.columns:
         col_name = "Domaine .net"
     elif "Domain" in df.columns:
         col_name = "Domain"
     else:
         raise ValueError(f"Aucune colonne 'Domaine .net' ou 'Domain' trouvée dans {file_path}.")
+
+    if domains is not None:
+        requested_domains = {normalize_domain(domain) for domain in domains}
+        filter_column = col_name if col_name in df.columns else "Domain"
+        df = df.loc[df[filter_column].map(normalize_domain).isin(requested_domains)]
 
     values = df[col_name].dropna().astype(str).str.strip()
     domains = []
@@ -69,15 +89,33 @@ def normalize_domain(value):
     return text
 
 
-def merge_dns_results_into_main_excel(main_excel_path: Path, dns_results_path: Path):
+def merge_dns_results_into_main_excel(
+    main_excel_path: Path,
+    dns_results_path: Path,
+    domain_column: str = "Domaine .net",
+):
     main_df = pd.read_excel(main_excel_path, engine="openpyxl")
     dns_df = pd.read_excel(dns_results_path, engine="openpyxl")
 
-    if "Domaine .net" not in main_df.columns and "Domain" in main_df.columns:
-        main_df["Domaine .net"] = main_df["Domain"].map(lambda d: d.replace(".com", ".net") if isinstance(d, str) and ".com" in d.lower() else d)
+    if domain_column not in main_df.columns and "Domain" in main_df.columns:
+        if domain_column == "Domaine .net":
+            main_df[domain_column] = main_df["Domain"].map(
+                lambda value: value[:-4] + ".net"
+                if isinstance(value, str) and value.lower().endswith(".com")
+                else value
+            )
+        else:
+            main_df[domain_column] = main_df["Domain"]
 
-    if "Domaine .net" not in dns_df.columns and "Domain" in dns_df.columns:
-        dns_df["Domaine .net"] = dns_df["Domain"].map(lambda d: d.replace(".com", ".net") if isinstance(d, str) and ".com" in d.lower() else d)
+    if domain_column not in dns_df.columns and "Domain" in dns_df.columns:
+        if domain_column == "Domaine .net":
+            dns_df[domain_column] = dns_df["Domain"].map(
+                lambda value: value[:-4] + ".net"
+                if isinstance(value, str) and value.lower().endswith(".com")
+                else value
+            )
+        else:
+            dns_df[domain_column] = dns_df["Domain"]
 
     for col in ["Status", "HTTP Code", "Resolved IP", "Note"]:
         if col not in main_df.columns:
@@ -85,17 +123,17 @@ def merge_dns_results_into_main_excel(main_excel_path: Path, dns_results_path: P
         else:
             main_df[col] = main_df[col].astype("object")
 
-    dns_df = dns_df[["Domaine .net", "Status", "HTTP Code", "Resolved IP", "Note"]].copy()
-    dns_df["Domaine .net"] = dns_df["Domaine .net"].map(normalize_domain)
-    dns_df = dns_df.drop_duplicates(subset=["Domaine .net"], keep="last")
+    dns_df = dns_df[[domain_column, "Status", "HTTP Code", "Resolved IP", "Note"]].copy()
+    dns_df[domain_column] = dns_df[domain_column].map(normalize_domain)
+    dns_df = dns_df.drop_duplicates(subset=[domain_column], keep="last")
 
-    main_df["__join_domain"] = main_df["Domaine .net"].map(normalize_domain)
+    main_df["__join_domain"] = main_df[domain_column].map(normalize_domain)
 
     for idx, row in main_df.iterrows():
         key = row["__join_domain"]
         if not key:
             continue
-        match = dns_df[dns_df["Domaine .net"] == key]
+        match = dns_df[dns_df[domain_column] == key]
         if match.empty:
             continue
         for col in ["Status", "HTTP Code", "Resolved IP", "Note"]:
@@ -107,7 +145,7 @@ def merge_dns_results_into_main_excel(main_excel_path: Path, dns_results_path: P
 
     main_df = main_df.drop(columns=["__join_domain"], errors="ignore")
     main_df.to_excel(main_excel_path, index=False, engine="openpyxl")
-    print(f"✅ Jointure effectuée sur Domaine .net dans : {main_excel_path}")
+    print(f"✅ Jointure effectuée sur {domain_column} dans : {main_excel_path}")
     return main_df
 
 
@@ -117,14 +155,21 @@ def init_driver():
     return driver, wait
 
 
-def extract_results_table(driver, expected_count):
+def extract_results_table(
+    driver,
+    expected_count,
+    cancel_check=None,
+    domain_column="Domaine .net",
+):
     rows_selector = "table.results-table tbody tr"
+
+    def results_ready(current_driver):
+        if cancel_check is not None:
+            cancel_check()
+        return len(current_driver.find_elements(By.CSS_SELECTOR, rows_selector)) >= expected_count
+
     try:
-        WebDriverWait(driver, RESULTS_TIMEOUT_SECONDS).until(
-            lambda current_driver: len(
-                current_driver.find_elements(By.CSS_SELECTOR, rows_selector)
-            ) >= expected_count
-        )
+        WebDriverWait(driver, RESULTS_TIMEOUT_SECONDS).until(results_ready)
     except TimeoutException as exc:
         actual_count = len(driver.find_elements(By.CSS_SELECTOR, rows_selector))
         page_text = driver.find_element(By.TAG_NAME, "body").text[:1000]
@@ -150,7 +195,7 @@ def extract_results_table(driver, expected_count):
         note = cells[5].text.strip()
 
         result_rows.append({
-            "Domaine .net": domain,
+            domain_column: domain,
             "Status": status,
             "HTTP Code": http_code,
             "Resolved IP": resolved_ip,
@@ -160,18 +205,27 @@ def extract_results_table(driver, expected_count):
     return result_rows
 
 
-def bulk_check_domains(file_path: str | Path | None = None, auto_close: bool = False):
+def bulk_check_domains(
+    file_path: str | Path | None = None,
+    auto_close: bool = False,
+    domains: list[str] | None = None,
+    cancel_check=None,
+    target_tld: str | None = None,
+):
+    if cancel_check is not None:
+        cancel_check()
     if file_path is None:
-        excel_path = PROJECT_ROOT / "expired_domains_TLD_net.xlsx"
+        excel_path = find_excel_file()
     else:
         excel_path = Path(file_path)
         if not excel_path.exists():
-            excel_path = PROJECT_ROOT / "expired_domains_TLD_net.xlsx"
+            excel_path = find_excel_file()
 
     if excel_path.name.lower() == "expired_domains.xlsx":
         excel_path = PROJECT_ROOT / "expired_domains_TLD_net.xlsx"
 
-    domains = get_domains_from_excel(excel_path)
+    domain_column = f"Domaine {target_tld}" if target_tld else "Domaine .net"
+    domains = get_domains_from_excel(excel_path, domains=domains, target_tld=target_tld)
 
     if len(domains) > 500:
         print(f"{len(domains)} domaines trouvés. Seuls les 500 premiers seront envoyés.")
@@ -181,8 +235,12 @@ def bulk_check_domains(file_path: str | Path | None = None, auto_close: bool = F
 
     driver, wait = init_driver()
     try:
+        if cancel_check is not None:
+            cancel_check()
         driver.get("https://seowebchecker.com/bulk-domain-search")
         wait.until(EC.presence_of_element_located((By.ID, "domainInput")))
+        if cancel_check is not None:
+            cancel_check()
 
         textarea = driver.find_element(By.ID, "domainInput")
         domain_text = "\n".join(domains)
@@ -201,7 +259,12 @@ def bulk_check_domains(file_path: str | Path | None = None, auto_close: bool = F
         print("✅ Bouton 'Check Domains' cliqué.")
         print("Le site traite maintenant les domaines envoyés.")
 
-        rows = extract_results_table(driver, len(domains))
+        rows = extract_results_table(
+            driver,
+            len(domains),
+            cancel_check=cancel_check,
+            domain_column=domain_column,
+        )
         df_results = pd.DataFrame(rows)
 
         raw_results_path = excel_path.parent / "dns_checker_results.xlsx"
@@ -210,7 +273,11 @@ def bulk_check_domains(file_path: str | Path | None = None, auto_close: bool = F
             return False
 
         df_results.to_excel(raw_results_path, index=False, engine="openpyxl")
-        merge_dns_results_into_main_excel(excel_path, raw_results_path)
+        merge_dns_results_into_main_excel(
+            excel_path,
+            raw_results_path,
+            domain_column=domain_column,
+        )
 
         if raw_results_path.exists():
             raw_results_path.unlink()

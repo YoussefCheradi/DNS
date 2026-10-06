@@ -3,90 +3,134 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f3f5ef">
-  <title>Fast Domain Name</title>
+  <meta name="theme-color" content="#f7f9fc">
+  <title>Geo-Domain Finder</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='fast-domains.css') }}">
   <script src="{{ url_for('static', filename='fast-domains.js') }}" defer></script>
 </head>
 <body>
   <div class="page-shell">
     <header class="topbar">
-      <a class="brand" href="/" aria-label="Fast Domain Name, accueil">
-        <span class="brand-mark">FD</span>
-        <span>Fast Domain Name</span>
+      <a class="brand" href="/" aria-label="Geo-Domain Finder, accueil">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M19 10.2c0 5-7 10.3-7 10.3S5 15.2 5 10.2a7 7 0 1 1 14 0Z" stroke="currentColor" stroke-width="1.8"/>
+            <circle cx="12" cy="10" r="2.3" fill="currentColor"/>
+          </svg>
+        </span>
+        <span>Geo-Domain Finder</span>
       </a>
-      <div class="local-indicator"><span class="local-dot"></span> SESSION LOCALE</div>
+      <div class="local-indicator"><span class="local-dot"></span> APPLICATION LOCALE</div>
     </header>
 
     <main>
       <section class="intro" aria-labelledby="page-title">
         <div>
-          <p class="eyebrow">RECHERCHE DE DOMAINES · EXPORT EXCEL</p>
-          <h1 id="page-title">Trouvez votre prochain domaine.</h1>
-          <p class="intro-copy">Lancez la collecte, vérifiez les domaines et récupérez les résultats dans un seul classeur.</p>
+          <p class="eyebrow"><span class="eyebrow-dot"></span> GEO-DOMAIN INTELLIGENCE <span class="eyebrow-divider">/</span> EXPORT EXCEL</p>
+          <h1 id="page-title">Explorez les domaines <span>ville par ville.</span></h1>
+          <p class="intro-copy">Identifiez des opportunités locales, vérifiez leur statut et rassemblez vos résultats dans un classeur prêt à l’analyse.</p>
         </div>
         <div class="output-tag" aria-label="Nom du fichier de sortie">
-          <span class="output-kicker">FICHIER DE SORTIE</span>
-          <strong>expired_domains_TLD_net.xlsx</strong>
-          <span class="file-type">XLSX <span>·</span> EXCEL</span>
+          <span class="file-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M7 3.75h7l4 4v12.5H7a2 2 0 0 1-2-2v-12a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.6"/><path d="M14 4v4h4M8.5 13h7M8.5 16h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </span>
+          <span class="output-copy">
+            <span class="output-kicker">CLASSEUR DE RÉSULTATS</span>
+            <strong>expired_domains_TLD_net_final.xlsx</strong>
+            <span class="file-type">EXCEL <span>·</span> XLSX</span>
+          </span>
         </div>
       </section>
 
       <div class="workspace">
         <form id="search-form" class="form-panel">
+          <fieldset class="workflow-picker" aria-label="Mode de traitement">
+            <label class="workflow-choice" for="workflow-cities">
+              <input id="workflow-cities" name="workflow_mode" type="radio" value="cities" checked>
+              <span class="workflow-icon" aria-hidden="true">⌖</span>
+              <span><strong>Rechercher par ville</strong><small>Collecter de nouveaux domaines</small></span>
+            </label>
+            <label class="workflow-choice" for="workflow-upload">
+              <input id="workflow-upload" name="workflow_mode" type="radio" value="upload">
+              <span class="workflow-icon upload-icon" aria-hidden="true">↑</span>
+              <span><strong>Analyser un Excel</strong><small>Traiter un classeur existant</small></span>
+            </label>
+          </fieldset>
+          <div id="city-workflow">
           <section class="form-section">
             <div class="section-heading">
               <span class="step-number">01</span>
               <div>
                 <h2>Votre zone de recherche</h2>
-                <p>Une ville par ligne. Jusqu’à 50 villes et 5 pages par ville.</p>
+                <p>Choisissez un pays puis sélectionnez les villes à explorer.</p>
               </div>
             </div>
-            <label for="cities">Villes à explorer</label>
-            <textarea id="cities" name="cities" rows="6" required maxlength="3000" spellcheck="false">{{ default_cities | join('\n') }}</textarea>
-            <div class="field-meta"><span>Exemples chargés depuis la liste du projet, modifiables.</span><span id="city-count">0 ville</span></div>
-          </section>
-
-          <section class="form-section">
-            <div class="section-heading">
-              <span class="step-number">02</span>
-              <div>
-                <h2>Compte ExpiredDomains</h2>
-                <p>Ces identifiants sont utilisés uniquement pendant le traitement.</p>
-              </div>
+            <div class="country-field">
+              <label for="country">Pays des villes</label>
+              <select id="country" name="country" aria-describedby="country-city-count">
+                <option value="us" {% if country == 'us' %}selected{% endif %}>États-Unis</option>
+                <option value="ca" {% if country == 'ca' %}selected{% endif %}>Canada</option>
+              </select>
+              <p id="country-city-count" class="country-city-count" aria-live="polite">{{ city_total }} villes disponibles</p>
             </div>
-            <div class="field-grid">
-              <div class="field-wrap">
-                <label for="username">Nom d’utilisateur</label>
-                <input id="username" name="username" autocomplete="username" required placeholder="Votre identifiant">
-              </div>
-              <div class="field-wrap">
-                <label for="password">Mot de passe</label>
-                <input id="password" name="password" type="password" autocomplete="current-password" required placeholder="••••••••••••">
-              </div>
+            <div class="tld-field">
+              <label for="target-tld">TLD du domaine cible</label>
+              <input id="target-tld" name="tld" type="text" value=".net" maxlength="253" autocomplete="off" spellcheck="false" placeholder=".net, .us, .co.uk">
+              <p>Exemples : .net, .us, .com ou .co.uk. Un classeur distinct sera créé pour chaque TLD.</p>
+              <fieldset class="tld-recommendations" aria-label="TLD populaires">
+                <legend>Suggestions populaires</legend>
+                <label class="tld-chip" for="tld-net"><input id="tld-net" type="checkbox" value=".net" checked><span>.net</span></label>
+                <label class="tld-chip" for="tld-store"><input id="tld-store" type="checkbox" value=".store"><span>.store</span></label>
+                <label class="tld-chip" for="tld-uk"><input id="tld-uk" type="checkbox" value=".uk"><span>.uk</span></label>
+                <label class="tld-chip" for="tld-ca"><input id="tld-ca" type="checkbox" value=".ca"><span>.ca</span></label>
+                <label class="tld-chip" for="tld-io"><input id="tld-io" type="checkbox" value=".io"><span>.io</span></label>
+                <label class="tld-chip" for="tld-fr"><input id="tld-fr" type="checkbox" value=".fr"><span>.fr</span></label>
+              </fieldset>
             </div>
-            <details class="optional-fields">
-              <summary>Configurer la vérification e-mail (facultatif)</summary>
-              <p>À renseigner seulement si votre compte demande un code de vérification Gmail.</p>
-              <div class="field-grid">
-                <div class="field-wrap">
-                  <label for="gmail-address">Adresse Gmail</label>
-                  <input id="gmail-address" name="gmail_address" type="email" autocomplete="email" placeholder="nom@gmail.com">
+            <label class="all-cities-choice" for="scan-all-cities">
+              <input id="scan-all-cities" name="scan_all_cities" type="checkbox">
+              <span class="checkmark" aria-hidden="true"></span>
+              <span class="option-copy"><strong>Scanner toutes les villes</strong><small>Utiliser toute la liste des villes du fichier du projet.</small></span>
+            </label>
+            <div id="city-selection-options">
+              <fieldset class="city-mode-picker" aria-label="Mode de sélection des villes">
+                <label class="mode-choice" for="city-mode-manual">
+                  <input id="city-mode-manual" name="city_mode" type="radio" value="manual" checked>
+                  <span><strong>Saisie libre</strong><small>Entrez une ville par ligne.</small></span>
+                </label>
+                <label class="mode-choice" for="city-mode-range">
+                  <input id="city-mode-range" name="city_mode" type="radio" value="range" {% if not city_total %}disabled{% endif %}>
+                  <span><strong>Intervalle du fichier</strong><small>Choisissez les positions dans l’ordre de la liste.</small></span>
+                </label>
+              </fieldset>
+              <div id="manual-city-fields">
+                <label for="cities">Villes à explorer</label>
+                <textarea id="cities" name="cities" rows="6" spellcheck="false">{{ default_cities | join('\n') }}</textarea>
+                <div class="field-meta"><span>5 pages par ville.</span><span id="city-count">0 ville</span></div>
+              </div>
+              <div id="city-range-fields" hidden>
+                <div class="field-grid">
+                  <div class="field-wrap">
+                    <label for="city-start">Position de début</label>
+                    <input id="city-start" name="city_start" type="number" min="1" max="{{ city_total }}" value="1">
+                  </div>
+                  <div class="field-wrap">
+                    <label for="city-end">Position de fin</label>
+                    <input id="city-end" name="city_end" type="number" min="1" max="{{ city_total }}" value="{{ [10, city_total]|min }}">
+                  </div>
                 </div>
-                <div class="field-wrap">
-                  <label for="gmail-app-password">Mot de passe d’application</label>
-                  <input id="gmail-app-password" name="gmail_app_password" type="password" autocomplete="off" placeholder="Mot de passe d’application Gmail">
-                </div>
+                <div class="field-meta"><span>Positions inclusives, selon l’ordre du classeur.</span><span>{{ city_total }} villes disponibles</span></div>
+                <p id="city-range-count" class="range-count" aria-live="polite"></p>
               </div>
-            </details>
+            </div>
           </section>
 
           <section class="form-section last-section">
             <div class="section-heading">
-              <span class="step-number">03</span>
+              <span class="step-number">02</span>
               <div>
                 <h2>Étapes d’analyse</h2>
                 <p>Désactivez une étape si vous souhaitez uniquement collecter les domaines.</p>
@@ -107,20 +151,53 @@
               </label>
             </div>
           </section>
+          </div>
+
+          <section id="upload-workflow" class="form-section upload-workflow" hidden>
+            <div class="section-heading">
+              <span class="step-number">01</span>
+              <div>
+                <h2>Importer votre classeur</h2>
+                <p>Choisissez un fichier Excel contenant une colonne « Domain » ou « Domaine .net ».</p>
+              </div>
+            </div>
+            <label class="upload-file" for="workbook-file">
+              <input id="workbook-file" name="workbook" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+              <span class="upload-file-icon" aria-hidden="true">↑</span>
+              <span class="upload-file-copy"><strong id="workbook-file-name">Choisir un fichier Excel</strong><small>Format .xlsx · 30 Mo maximum</small></span>
+              <span class="upload-file-action">Parcourir</span>
+            </label>
+            <fieldset class="upload-analysis-picker" aria-label="Analyse à exécuter">
+              <label class="mode-choice" for="upload-analysis-dns">
+                <input id="upload-analysis-dns" name="upload_analysis" type="radio" value="dns" checked>
+                <span><strong>Statut DNS et HTTP</strong><small>État, code HTTP et adresse IP</small></span>
+              </label>
+              <label class="mode-choice" for="upload-analysis-google">
+                <input id="upload-analysis-google" name="upload_analysis" type="radio" value="google">
+                <span><strong>Google et Maps</strong><small>Résultats sponsorisés et pages Maps</small></span>
+              </label>
+            </fieldset>
+          </section>
 
           <div class="submit-row">
             <button id="submit-button" class="primary-button" type="submit">
-              <span>Lancer la recherche</span><span class="button-arrow" aria-hidden="true">→</span>
+              <span class="button-label">Lancer la recherche</span>
+              <span class="button-arrow" aria-hidden="true">
+                <svg viewBox="0 0 20 20" fill="none"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
             </button>
-            <p>Chrome s’ouvrira sur cet ordinateur pendant les vérifications.</p>
+            <p><span class="secure-icon" aria-hidden="true">●</span> Chrome s’ouvrira sur cet ordinateur pendant les vérifications.</p>
           </div>
           <div id="form-error" class="form-error" role="alert" hidden></div>
         </form>
 
         <aside class="status-panel" aria-label="État du traitement">
-          <div class="status-topline"><span>ACTIVITÉ</span><span class="status-symbol" aria-hidden="true">◎</span></div>
+          <div class="status-topline"><span class="status-kicker"><span class="status-pulse"></span> CENTRE D’ACTIVITÉ</span><span class="status-symbol" aria-hidden="true">↗</span></div>
           <h2 id="status-title">Prêt à chercher</h2>
-          <p id="status-description">Configurez vos villes et vos identifiants pour préparer un fichier Excel.</p>
+          <p id="status-description">Configurez vos villes pour préparer un fichier Excel.</p>
+          <button id="retry-button" class="retry-button" type="button" hidden>Reprendre à la dernière étape acquise</button>
+          <button id="cancel-button" class="cancel-button" type="button" hidden>Annuler le traitement</button>
+          <button id="restart-button" class="restart-button" type="button" hidden>Redémarrer depuis le début</button>
 
           <div class="progress-block">
             <div class="progress-label"><span>PROGRESSION</span><span id="progress-value">0%</span></div>
@@ -141,12 +218,12 @@
             <a id="download-link" class="download-button" href="#">Télécharger le fichier <span aria-hidden="true">↓</span></a>
           </div>
 
-          <p class="privacy-note"><span class="privacy-mark">●</span> Les identifiants ne sont pas enregistrés dans un fichier. Cette application accepte uniquement les connexions depuis cet ordinateur.</p>
+          <p class="privacy-note"><span class="privacy-mark">●</span> Les identifiants sont lus depuis le fichier .env sur cet ordinateur.</p>
         </aside>
       </div>
     </main>
 
-    <footer class="footer"><span>FAST DOMAIN NAME</span><span>RECHERCHE LOCALE · EXPORT .XLSX</span></footer>
+    <footer class="footer"><span>GEO-DOMAIN FINDER</span><span>RECHERCHE LOCALE <i>·</i> EXPORT .XLSX</span></footer>
   </div>
 </body>
 </html>
