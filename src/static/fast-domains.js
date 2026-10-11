@@ -10,6 +10,7 @@ const cityEnd = document.querySelector("#city-end");
 const cityRangeCount = document.querySelector("#city-range-count");
 const countrySelect = document.querySelector("#country");
 const countryCityCount = document.querySelector("#country-city-count");
+const outputFilename = document.querySelector("#output-filename");
 const rangeCityTotal = rangeCityFields.querySelector(".field-meta span:last-child");
 const targetTld = document.querySelector("#target-tld");
 const tldRecommendations = [...document.querySelectorAll(".tld-recommendations input[type='checkbox']")];
@@ -35,6 +36,13 @@ const resultCount = document.querySelector("#result-count");
 
 let polling = false;
 let loadedCountry = countrySelect.value;
+
+function updateOutputFilename() {
+  const country = countrySelect.value.toLowerCase();
+  const tld = targetTld.value.trim().toLowerCase().replace(/^\.+/, "").replace(/\./g, "_");
+  const countryPrefix = country === "us" ? "" : `${country.toUpperCase()}_`;
+  outputFilename.textContent = `expired_domains_${countryPrefix}TLD_${tld || "net"}_final.xlsx`;
+}
 
 function countCities() {
   const cities = cityInput.value.split(/\r?\n/).map((city) => city.trim()).filter(Boolean);
@@ -97,6 +105,7 @@ async function loadCountryCities() {
     countryCityCount.textContent = `${result.total} villes disponibles`;
     rangeCityTotal.textContent = `${result.total} villes disponibles`;
     loadedCountry = countrySelect.value;
+    updateOutputFilename();
     countCities();
     updateCityMode();
     formError.hidden = true;
@@ -278,6 +287,7 @@ targetTld.addEventListener("input", () => {
   tldRecommendations.forEach((recommendation) => {
     recommendation.checked = recommendation.value === value;
   });
+  updateOutputFilename();
 });
 tldRecommendations.forEach((recommendation) => {
   recommendation.addEventListener("change", () => {
@@ -289,9 +299,11 @@ tldRecommendations.forEach((recommendation) => {
     } else if (targetTld.value.trim().toLowerCase() === recommendation.value) {
       targetTld.value = "";
     }
+    updateOutputFilename();
   });
 });
 countCities();
+updateOutputFilename();
 updateCityMode();
 updateWorkflowMode();
 

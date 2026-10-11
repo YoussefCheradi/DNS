@@ -36,12 +36,16 @@ COUNTRY_CITY_FILES = {
     "us": CITY_FILE,
     "ca": PROJECT_ROOT / "src" / "citys" / "villes_canada.xlsx",
 }
-OUTPUT_FILENAME = "expired_domains_TLD_net_final.xlsx"
-
-
-def _output_filename_for_tld(tld):
+def _output_filename_for_country_tld(country, tld):
     suffix = normalize_tld(tld)[1:]
-    return f"expired_domains_TLD_{suffix.replace('.', '_')}_final.xlsx"
+    tld_suffix = suffix.replace(".", "_")
+    country_code = country.strip().lower()
+    if country_code == "us":
+        return f"expired_domains_TLD_{tld_suffix}_final.xlsx"
+    return f"expired_domains_{country_code.upper()}_TLD_{tld_suffix}_final.xlsx"
+
+
+OUTPUT_FILENAME = _output_filename_for_country_tld("us", ".net")
 
 app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
@@ -179,9 +183,10 @@ def _run_pipeline(
     run_google,
     cancel_event,
     tld=".net",
+    country="us",
 ):
     driver = None
-    output_filename = _output_filename_for_tld(tld)
+    output_filename = _output_filename_for_country_tld(country, tld)
     output_path = PROJECT_ROOT / output_filename
     checkpoint = jobs[job_id]["_checkpoint"]
 
@@ -552,7 +557,7 @@ def create_job():
             return jsonify(error="Un traitement est déjà en cours. Attendez sa fin avant d’en lancer un autre."), 409
 
         job_id = uuid.uuid4().hex
-        output_filename = _output_filename_for_tld(tld)
+        output_filename = _output_filename_for_country_tld(country, tld)
         jobs[job_id] = {
             "id": job_id,
             "status": "queued",
@@ -586,6 +591,7 @@ def create_job():
         run_google,
         cancel_event,
         tld,
+        country,
     )
     return jsonify(id=job_id, status_url=f"/api/jobs/{job_id}"), 202
 
@@ -634,6 +640,7 @@ def retry_job(job_id):
         run_dns = job.get("_run_dns", False)
         run_google = job.get("_run_google", False)
         tld = job.get("_tld", ".net")
+        country = job.get("_country", "us")
         cancel_event = job["_cancel_event"]
         cancel_event.clear()
         job.update(
@@ -669,6 +676,7 @@ def retry_job(job_id):
         run_google,
         cancel_event,
         tld,
+        country,
     )
     return jsonify(id=job_id, status_url=f"/api/jobs/{job_id}"), 202
 
@@ -690,6 +698,7 @@ def restart_job(job_id):
         run_google = job.get("_run_google", False)
         retry_domains = list(job.get("_checkpoint", {}).get("new_domains", []))
         tld = job.get("_tld", ".net")
+        country = job.get("_country", "us")
         cancel_event = job["_cancel_event"]
         cancel_event.clear()
         if is_upload:
@@ -740,6 +749,7 @@ def restart_job(job_id):
         run_google,
         cancel_event,
         tld,
+        country,
     )
     return jsonify(id=job_id, status_url=f"/api/jobs/{job_id}"), 202
 

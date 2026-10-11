@@ -11,8 +11,18 @@ from seowebchecker_bulk_domain_check import bulk_check_domains
 load_dotenv()
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-EXCEL_PATH = PROJECT_ROOT / "expired_domains_TLD_net_final.xlsx"
-CITYS_PATH = PROJECT_ROOT / "src" / "citys" / "us_cities_sample.xlsx"
+COUNTRY = os.getenv("COUNTRY", "us").strip().lower()
+COUNTRY_CITY_FILES = {
+    "us": PROJECT_ROOT / "src" / "citys" / "us_cities_sample.xlsx",
+    "ca": PROJECT_ROOT / "src" / "citys" / "villes_canada.xlsx",
+}
+try:
+    CITYS_PATH = COUNTRY_CITY_FILES[COUNTRY]
+except KeyError as exc:
+    raise ValueError(f"Pays non configuré : {COUNTRY}") from exc
+
+output_country_prefix = "" if COUNTRY == "us" else f"{COUNTRY.upper()}_"
+EXCEL_PATH = PROJECT_ROOT / f"expired_domains_{output_country_prefix}TLD_net_final.xlsx"
 
 USERNAME           = os.getenv("EXPIREDDOMAINS_USERNAME")
 PASSWORD           = os.getenv("EXPIREDDOMAINS_PASSWORD")
