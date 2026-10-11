@@ -150,7 +150,12 @@ def merge_dns_results_into_main_excel(
 
 
 def init_driver():
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
+    options = webdriver.ChromeOptions()
+    options.add_argument("--start-maximized")
+    driver = webdriver.Chrome(
+        service=Service(ChromeDriverManager().install()),
+        options=options,
+    )
     wait = WebDriverWait(driver, 20)
     return driver, wait
 

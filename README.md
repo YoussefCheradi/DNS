@@ -92,6 +92,33 @@ Lancez le serveur local une fois :
 python src/web_app.py
 ```
 
+#### Démarrer depuis le Bureau avec un fichier `.bat`
+
+Pour lancer l’application sans ouvrir PowerShell manuellement, créez un fichier `Domain_finder.bat` sur le Bureau, au même niveau que le dossier `DNS`, puis copiez-y le code suivant :
+
+```bat
+@echo off
+cd /d "%~dp0DNS"
+
+if not exist "src\web_app.py" (
+    echo Impossible de trouver le projet dans "%~dp0DNS".
+    pause
+    exit /b 1
+)
+
+if exist ".venv-1\Scripts\python.exe" (
+    ".venv-1\Scripts\python.exe" "src\web_app.py"
+) else if exist ".venv\Scripts\python.exe" (
+    ".venv\Scripts\python.exe" "src\web_app.py"
+) else (
+    python "src\web_app.py"
+)
+
+pause
+```
+
+Double-cliquez sur `Domain_finder.bat` pour démarrer le serveur, puis ouvrez [http://127.0.0.1:5000](http://127.0.0.1:5000) dans votre navigateur. Pour arrêter le serveur, revenez à la fenêtre de commande et appuyez sur `Ctrl+C`.
+
 Avant la première recherche Google, préparez le profil Chrome utilisé par l’application :
 
 1. Installez l’extension Chrome **Buster: Captcha Solver for Humans** dans le profil `C:\ChromeTemp\Default` utilisé par le scraper Google. Une extension installée uniquement dans votre profil Chrome habituel peut ne pas être présente dans ce profil d’automatisation.

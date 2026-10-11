@@ -94,7 +94,12 @@ def get_verification_code_from_gmail(gmail_address, app_password, retries=5, del
 
 
 def init_driver():
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
+    options = webdriver.ChromeOptions()
+    options.add_argument("--start-maximized")
+    driver = webdriver.Chrome(
+        service=Service(ChromeDriverManager().install()),
+        options=options,
+    )
     wait = WebDriverWait(driver, 20)
     return driver, wait
 
