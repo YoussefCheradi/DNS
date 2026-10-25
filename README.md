@@ -46,7 +46,7 @@ L’application web peut lancer les trois étapes à la suite. Le point d’entr
 ## Prérequis
 
 - Windows et Python 3.10 ou plus récent.
-- Google Chrome installé. `Google.py` utilise actuellement `undetected_chromedriver` avec la version majeure **154** ; si Chrome est mis à jour vers une autre version majeure, cette valeur dans `src/scrap_from_Google/Google.py` devra être adaptée.
+- Google Chrome installé. `Google.py` utilise actuellement `undetected_chromedriver` avec la version majeure **156** ; si Chrome est mis à jour vers une autre version majeure, cette valeur dans `src/scrap_from_Google/Google.py` devra être adaptée.
 - Une connexion Internet pour les sites consultés et le téléchargement éventuel des pilotes Chrome.
 - Un compte ExpiredDomains pour l’étape de collecte. Gmail et un mot de passe d’application sont nécessaires seulement si la vérification en deux étapes demande un code par e-mail.
 - Une clé Serper seulement pour la variante `Google2.py`.

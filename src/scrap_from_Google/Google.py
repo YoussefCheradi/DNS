@@ -30,8 +30,8 @@ def init_driver():
     options.add_argument(r"--user-data-dir=C:\ChromeTemp")
     options.add_argument("--profile-directory=Default")
 
-    print("  -> Initialisation Chrome 154...", flush=True)
-    driver = uc.Chrome(options=options, use_subprocess=True, version_main=154)
+    print("  -> Initialisation Chrome 156...", flush=True)
+    driver = uc.Chrome(options=options, use_subprocess=True, version_main=156)
     print("  -> Chrome prêt", flush=True)
 
     wait = WebDriverWait(driver, 15)
