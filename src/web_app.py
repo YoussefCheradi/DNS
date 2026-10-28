@@ -2,9 +2,12 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
 import random
+import re
 import tempfile
 import threading
+import time
 import uuid
+from urllib.parse import urlparse
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -20,7 +23,8 @@ from scrap_from_E_D.E_D import (
     scrape_city,
     setup_filters,
 )
-from scrap_from_Google.Google import enrich_with_google_data
+from scrap_from_Google.Google import enrich_with_google_data, scrape_google_website_links
+from scrap_from_Google.website_contacts import scrape_website_contacts
 from seowebchecker_bulk_domain_check import bulk_check_domains
 
 
@@ -395,13 +399,21 @@ def _run_uploaded_workbook(job_id, cancel_event):
         _check_cancelled(cancel_event)
         _set_job(job_id, status="running")
         frame = pd.read_excel(output_path, engine="openpyxl")
-        domain_column = "Domain" if "Domain" in frame.columns else "Domaine .net"
-        domains = frame[domain_column].dropna().astype(str).str.strip()
-        domains = list(dict.fromkeys(value for value in domains if value))
-        if not domains:
-            raise ValueError("Le classeur ne contient aucun domaine à analyser.")
+        if analysis == "contacts":
+            website_column = "Website URL" if "Website URL" in frame.columns else "Website"
+            websites = frame[website_column].dropna().astype(str).str.strip()
+            websites = list(dict.fromkeys(value for value in websites if value))
+            if not websites:
+                raise ValueError("Le classeur ne contient aucun lien dans « Website URL » ou « Website ».")
+            _append_log(job_id, f"Classeur chargé : {len(websites)} site(s) à enrichir.")
+        else:
+            domain_column = "Domain" if "Domain" in frame.columns else "Domaine .net"
+            domains = frame[domain_column].dropna().astype(str).str.strip()
+            domains = list(dict.fromkeys(value for value in domains if value))
+            if not domains:
+                raise ValueError("Le classeur ne contient aucun domaine à analyser.")
+            _append_log(job_id, f"Classeur chargé : {len(domains)} domaine(s) détecté(s).")
 
-        _append_log(job_id, f"Classeur chargé : {len(domains)} domaine(s) détecté(s).")
         if analysis == "dns":
             _set_stage(job_id, "Vérification DNS et HTTP", 15, "Lancement de la vérification DNS et HTTP…")
             if not bulk_check_domains(
@@ -410,7 +422,7 @@ def _run_uploaded_workbook(job_id, cancel_event):
                 cancel_check=lambda: _check_cancelled(cancel_event),
             ):
                 raise RuntimeError("SEO Web Checker n’a retourné aucun résultat.")
-        else:
+        elif analysis == "google":
             _set_stage(job_id, "Enrichissement Google et Maps", 15, "Lancement de la recherche Google et Maps…")
             enrich_with_google_data(
                 str(output_path),
@@ -418,6 +430,78 @@ def _run_uploaded_workbook(job_id, cancel_event):
                 progress_callback=lambda message: _append_log(job_id, message),
                 cancel_check=lambda: _check_cancelled(cancel_event),
             )
+        else:
+            contact_columns = [
+                "Website",
+                "Emails",
+                "Instagram URLs",
+                "LinkedIn URLs",
+                "Facebook URLs",
+                "X URLs",
+                "Email Source URLs",
+                "Instagram Source URLs",
+                "LinkedIn Source URLs",
+                "Facebook Source URLs",
+                "X Source URLs",
+                "Email Status",
+                "Email Format Status",
+                "Social Status",
+                "Social Association Status",
+                "Cookie Notice (public)",
+                "Cookie Policy URL",
+                "Cookie Policy Notes (public)",
+                "Pages Scanned",
+                "Pages Visited",
+                "Pages Skipped",
+                "Skipped Page URLs",
+                "Pages Failed",
+                "Failed Page URLs",
+                "Discovered At UTC",
+                "Scrape Status",
+            ]
+            for column in contact_columns:
+                if column == "Pages Scanned":
+                    if column in frame.columns:
+                        frame[column] = pd.to_numeric(frame[column], errors="coerce").astype("Int64")
+                    else:
+                        frame[column] = pd.Series(pd.NA, index=frame.index, dtype="Int64")
+                elif column in frame.columns:
+                    frame[column] = frame[column].astype(object)
+                else:
+                    frame[column] = pd.Series(index=frame.index, dtype=object)
+            website_values = frame[website_column].fillna("").astype(str).str.strip()
+            unique_websites = list(dict.fromkeys(value for value in website_values if value))
+            partial_path = output_path.with_name(f"{output_path.stem}.writing.xlsx")
+            completed_sites = 0
+            try:
+                for website in unique_websites:
+                    _check_cancelled(cancel_event)
+                    result = scrape_website_contacts(
+                        website,
+                        cancel_check=lambda: _check_cancelled(cancel_event),
+                    )
+                    matching_rows = website_values.eq(website)
+                    result["Website"] = website
+                    result["Discovered At UTC"] = pd.Timestamp.now(tz="UTC").isoformat()
+                    for column in contact_columns:
+                        frame.loc[matching_rows, column] = result[column]
+                    completed_sites += 1
+                    frame.to_excel(partial_path, index=False, engine="openpyxl")
+                    os.replace(partial_path, output_path)
+                    progress = 15 + round(completed_sites / len(unique_websites) * 80)
+                    _set_stage(
+                        job_id,
+                        f"Enrichissement des sites · {completed_sites}/{len(unique_websites)}",
+                        progress,
+                        f"{website} : {result['Scrape Status']}, "
+                        f"{len(result['Emails'].split('; ')) if result['Emails'] else 0} email(s), "
+                        f"{result['Pages Scanned']} page(s) consultée(s), "
+                        f"{result['Pages Failed']} échec(s).",
+                    )
+                    _set_job(job_id, row_count=completed_sites, result_unit="site")
+                    time.sleep(0.25)
+            finally:
+                partial_path.unlink(missing_ok=True)
 
         _check_cancelled(cancel_event)
         row_count = len(pd.read_excel(output_path, engine="openpyxl"))
@@ -426,20 +510,33 @@ def _run_uploaded_workbook(job_id, cancel_event):
             status="completed",
             stage="Fichier prêt",
             progress=100,
-            row_count=row_count,
+            row_count=completed_sites if analysis == "contacts" else row_count,
+            result_unit="site" if analysis == "contacts" else "domaine",
             output_path=str(output_path),
             download_url=f"/api/jobs/{job_id}/download",
         )
         _append_log(job_id, f"Analyse terminée : {row_count} ligne(s) dans le classeur.")
     except Exception as exc:
         if isinstance(exc, JobCancelled) or cancel_event.is_set():
-            _finish_cancelled_job(job_id, "Analyse du classeur annulée.")
+            partial_path = output_path.with_name(f"{output_path.stem}.writing.xlsx")
+            partial_path.unlink(missing_ok=True)
+            _set_job(
+                job_id,
+                status="cancelled",
+                stage="Analyse du classeur annulée",
+                error=None,
+                output_path=str(output_path) if output_path.is_file() else None,
+                download_url=f"/api/jobs/{job_id}/download" if output_path.is_file() else None,
+            )
+            _append_log(job_id, "Analyse annulée ; le classeur déjà sauvegardé reste disponible.")
             return
         _set_job(
             job_id,
             status="failed",
             stage="Analyse du classeur interrompue",
             error=f"{type(exc).__name__}: {exc}",
+            output_path=str(output_path) if output_path.is_file() else None,
+            download_url=f"/api/jobs/{job_id}/download" if output_path.is_file() else None,
         )
         _append_log(job_id, f"Erreur ({type(exc).__name__}) : {exc!r}")
 
@@ -449,12 +546,131 @@ def _submit_uploaded_workbook(job_id):
     executor.submit(_run_uploaded_workbook, job_id, job["_cancel_event"])
 
 
+def _normalize_search_domain(value):
+    value = str(value or "").strip()
+    if not value:
+        raise ValueError("Entrez un domaine ou des mots-clés, par exemple « seo services ottawa ».")
+    if len(value) > 200 or any(ord(character) < 32 for character in value):
+        raise ValueError("La recherche doit contenir au maximum 200 caractères.")
+    if "://" in value:
+        try:
+            parsed = urlparse(value)
+        except ValueError as exc:
+            raise ValueError("Entrez un domaine valide ou des mots-clés de recherche.") from exc
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("Entrez un domaine valide ou des mots-clés de recherche.")
+        return parsed.hostname.lower().removeprefix("www.")
+    return " ".join(value.split())
+
+
+def _run_website_scrape(job_id, domain, pages, output_path, cancel_event):
+    columns = ["Domain", "Google Maps Page", "Website URL"]
+    partial_path = output_path.with_name(f"{output_path.stem}.writing.xlsx")
+    rows = []
+    seen_urls = set()
+
+    def save_results():
+        frame = pd.DataFrame(rows, columns=columns)
+        try:
+            frame.to_excel(partial_path, index=False, engine="openpyxl")
+            os.replace(partial_path, output_path)
+        finally:
+            partial_path.unlink(missing_ok=True)
+
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if output_path.exists():
+            existing = pd.read_excel(output_path, engine="openpyxl")
+            rows.extend(existing[columns].to_dict("records"))
+            seen_urls.update(str(row["Website URL"]) for row in rows)
+        else:
+            save_results()
+
+        _check_cancelled(cancel_event)
+        _set_job(job_id, status="running")
+        _set_stage(job_id, "Démarrage de Chrome", 5, "Initialisation de Chrome pour Google Maps…")
+        completed_pages = 0
+
+        def save_result(result):
+            url = result["Website URL"]
+            if url in seen_urls:
+                return
+            rows.append({"Domain": domain, **result})
+            save_results()
+            seen_urls.add(url)
+            _set_job(job_id, row_count=len(rows))
+
+        def report_progress(message):
+            nonlocal completed_pages
+            if not message.startswith("Page Google Maps "):
+                _append_log(job_id, message)
+                return
+            completed_pages += 1
+            progress = (
+                min(90, 10 + completed_pages)
+                if pages is None
+                else min(90, 10 + round(completed_pages / pages * 80))
+            )
+            page_limit = "toutes" if pages is None else str(pages)
+            _set_stage(
+                job_id,
+                f"Scraping Google Maps · page {completed_pages}/{page_limit}",
+                progress,
+                message,
+            )
+
+        page_limit = "toutes les pages disponibles" if pages is None else f"{pages} page(s) maximum"
+        _append_log(job_id, f"Recherche Google « {domain} » sur {page_limit}.")
+        scrape_google_website_links(
+            domain,
+            pages,
+            progress_callback=report_progress,
+            cancel_check=lambda: _check_cancelled(cancel_event),
+            result_callback=save_result,
+        )
+        _check_cancelled(cancel_event)
+        _set_job(
+            job_id,
+            status="completed",
+            stage="Fichier prêt",
+            progress=100,
+            row_count=len(rows),
+            result_unit="lien",
+            output_path=str(output_path),
+            download_url=f"/api/jobs/{job_id}/download",
+        )
+        _append_log(job_id, f"Scraping terminé : {len(rows)} lien(s) enregistré(s) dans le fichier Excel.")
+    except Exception as exc:
+        if isinstance(exc, JobCancelled) or cancel_event.is_set():
+            _set_job(
+                job_id,
+                status="cancelled",
+                stage="Scraping annulé",
+                error=None,
+                row_count=len(rows),
+                output_path=str(output_path) if output_path.is_file() else None,
+                download_url=f"/api/jobs/{job_id}/download" if output_path.is_file() else None,
+            )
+            _append_log(job_id, "Scraping des liens Google Maps annulé ; les résultats enregistrés restent disponibles.")
+            return
+        _set_job(
+            job_id,
+            status="failed",
+            stage="Scraping interrompu",
+            error=f"{type(exc).__name__}: {exc}",
+            row_count=len(rows),
+            output_path=str(output_path) if output_path.is_file() else None,
+            download_url=f"/api/jobs/{job_id}/download" if output_path.is_file() else None,
+        )
+        _append_log(job_id, f"Erreur ({type(exc).__name__}) : {exc!r}")
+
+
 @app.post("/api/upload-jobs")
 def create_upload_job():
     uploaded_file = request.files.get("workbook")
     analysis = request.form.get("analysis")
-    if analysis not in {"dns", "google"}:
-        return jsonify(error="Choisissez une analyse DNS/HTTP ou Google/Maps."), 400
+    if analysis not in {"dns", "google", "contacts"}:
+        return jsonify(error="Choisissez une analyse DNS/HTTP, Google/Maps ou contacts."), 400
     if uploaded_file is None or not uploaded_file.filename:
         return jsonify(error="Sélectionnez un classeur Excel à analyser."), 400
 
@@ -468,16 +684,24 @@ def create_upload_job():
     try:
         uploaded_file.save(output_path)
         frame = pd.read_excel(output_path, engine="openpyxl")
-        if "Domain" not in frame.columns and "Domaine .net" not in frame.columns:
-            raise ValueError("Le classeur doit contenir une colonne « Domain » ou « Domaine .net ».")
-        if "Domain" not in frame.columns:
-            frame["Domain"] = frame["Domaine .net"]
-        elif "Domaine .net" in frame.columns:
-            missing_domain = frame["Domain"].isna() | frame["Domain"].astype(str).str.strip().eq("")
-            frame.loc[missing_domain, "Domain"] = frame.loc[missing_domain, "Domaine .net"]
-        domains = frame["Domain"].dropna().astype(str).str.strip()
-        if not domains.map(bool).any():
-            raise ValueError("Le classeur ne contient aucun domaine à analyser.")
+        if analysis == "contacts":
+            website_column = "Website URL" if "Website URL" in frame.columns else "Website"
+            if website_column not in frame.columns:
+                raise ValueError("Le classeur doit contenir une colonne « Website URL » ou « Website ».")
+            websites = frame[website_column].dropna().astype(str).str.strip()
+            if not websites.map(bool).any():
+                raise ValueError("Le classeur ne contient aucun lien de site web.")
+        else:
+            if "Domain" not in frame.columns and "Domaine .net" not in frame.columns:
+                raise ValueError("Le classeur doit contenir une colonne « Domain » ou « Domaine .net ».")
+            if "Domain" not in frame.columns:
+                frame["Domain"] = frame["Domaine .net"]
+            elif "Domaine .net" in frame.columns:
+                missing_domain = frame["Domain"].isna() | frame["Domain"].astype(str).str.strip().eq("")
+                frame.loc[missing_domain, "Domain"] = frame.loc[missing_domain, "Domaine .net"]
+            domains = frame["Domain"].dropna().astype(str).str.strip()
+            if not domains.map(bool).any():
+                raise ValueError("Le classeur ne contient aucun domaine à analyser.")
         frame.to_excel(output_path, index=False, engine="openpyxl")
     except Exception as exc:
         output_path.unlink(missing_ok=True)
@@ -502,12 +726,65 @@ def create_upload_job():
             "download_url": None,
             "_job_type": "upload",
             "_output_path": str(output_path),
-            "_download_name": f"{stem}_analyse.xlsx",
+            "_download_name": f"{stem}_{'contacts' if analysis == 'contacts' else 'analyse'}.xlsx",
             "_upload_analysis": analysis,
             "_cancel_event": threading.Event(),
         }
 
     _submit_uploaded_workbook(job_id)
+    return jsonify(id=job_id, status_url=f"/api/jobs/{job_id}"), 202
+
+
+@app.post("/api/website-scrape-jobs")
+def create_website_scrape_job():
+    payload = request.get_json(silent=True) or {}
+    try:
+        domain = _normalize_search_domain(payload.get("domain"))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+
+    all_pages = payload.get("all_pages") is True
+    pages = payload.get("pages")
+    if all_pages:
+        pages = None
+    elif isinstance(pages, bool) or not isinstance(pages, int) or not 1 <= pages <= 10:
+        return jsonify(error="Choisissez un nombre de pages compris entre 1 et 10."), 400
+
+    job_id = uuid.uuid4().hex
+    safe_domain = re.sub(r"[^a-z0-9.-]+", "-", domain.lower()).strip(".-") or "google-maps"
+    with jobs_lock:
+        if any(job["status"] in {"queued", "running", "cancelling"} for job in jobs.values()):
+            return jsonify(error="Un traitement est déjà en cours. Attendez sa fin avant d’en lancer un autre."), 409
+
+        job_directory = Path(tempfile.mkdtemp(prefix=f"google-links-{job_id}-"))
+        output_path = job_directory / f"{safe_domain}_website_links.xlsx"
+        jobs[job_id] = {
+            "id": job_id,
+            "status": "queued",
+            "stage": "Dans la file d’attente",
+            "progress": 0,
+            "logs": [f"Scraping des liens Website pour {domain} ajouté à la file d’attente."],
+            "row_count": 0,
+            "result_unit": "lien",
+            "error": None,
+            "download_url": None,
+            "output_path": None,
+            "_output_path": str(output_path),
+            "_download_name": output_path.name,
+            "_job_type": "website_scrape",
+            "_website_domain": domain,
+            "_website_pages": pages,
+            "_cancel_event": threading.Event(),
+        }
+
+    executor.submit(
+        _run_website_scrape,
+        job_id,
+        domain,
+        pages,
+        output_path,
+        jobs[job_id]["_cancel_event"],
+    )
     return jsonify(id=job_id, status_url=f"/api/jobs/{job_id}"), 202
 
 
@@ -636,7 +913,10 @@ def retry_job(job_id):
             return jsonify(error="Un autre traitement est déjà en cours."), 409
 
         is_upload = job.get("_job_type") == "upload"
+        is_website_scrape = job.get("_job_type") == "website_scrape"
         cities = job.get("_cities", [])
+        website_domain = job.get("_website_domain")
+        website_pages = job.get("_website_pages")
         run_dns = job.get("_run_dns", False)
         run_google = job.get("_run_google", False)
         tld = job.get("_tld", ".net")
@@ -652,17 +932,29 @@ def retry_job(job_id):
             output_path=None,
             row_count=0,
         )
-        if not is_upload:
+        if not is_upload and not is_website_scrape:
             checkpoint = job["_checkpoint"]
             job["logs"].append(
                 f"Reprise demandée à la dernière étape acquise : {checkpoint['phase']}."
             )
+        elif is_website_scrape:
+            job["logs"].append("Nouvelle tentative du scraping des liens Google Maps.")
         else:
             job["logs"].append("Nouvelle tentative de l’analyse du classeur.")
         job["logs"] = job["logs"][-60:]
 
     if is_upload:
         _submit_uploaded_workbook(job_id)
+        return jsonify(id=job_id, status_url=f"/api/jobs/{job_id}"), 202
+    if is_website_scrape:
+        executor.submit(
+            _run_website_scrape,
+            job_id,
+            website_domain,
+            website_pages,
+            Path(job["_output_path"]),
+            cancel_event,
+        )
         return jsonify(id=job_id, status_url=f"/api/jobs/{job_id}"), 202
     executor.submit(
         _run_pipeline,
@@ -693,7 +985,10 @@ def restart_job(job_id):
             return jsonify(error="Un autre traitement est déjà en cours."), 409
 
         is_upload = job.get("_job_type") == "upload"
+        is_website_scrape = job.get("_job_type") == "website_scrape"
         cities = list(job.get("_cities", []))
+        website_domain = job.get("_website_domain")
+        website_pages = job.get("_website_pages")
         run_dns = job.get("_run_dns", False)
         run_google = job.get("_run_google", False)
         retry_domains = list(job.get("_checkpoint", {}).get("new_domains", []))
@@ -713,6 +1008,18 @@ def restart_job(job_id):
             )
             job["logs"].append("Nouvelle tentative de l’analyse du classeur.")
             job["logs"] = job["logs"][-60:]
+        elif is_website_scrape:
+            job.update(
+                status="queued",
+                stage="Relancement du scraping Google Maps",
+                progress=0,
+                error=None,
+                download_url=None,
+                output_path=None,
+                row_count=0,
+            )
+            job["logs"].append("Redémarrage du scraping des liens Google Maps demandé.")
+            job["logs"] = job["logs"][-60:]
         else:
             job.update(
                 status="queued",
@@ -730,12 +1037,26 @@ def restart_job(job_id):
         job["logs"].append(
             "Redémarrage de l’analyse du classeur demandé."
             if is_upload
-            else "Redémarrage depuis le début demandé. Le classeur existant n’est pas supprimé."
+            else (
+                "Redémarrage du scraping des liens Google Maps demandé."
+                if is_website_scrape
+                else "Redémarrage depuis le début demandé. Le classeur existant n’est pas supprimé."
+            )
         )
         job["logs"] = job["logs"][-60:]
 
     if is_upload:
         _submit_uploaded_workbook(job_id)
+        return jsonify(id=job_id, status_url=f"/api/jobs/{job_id}"), 202
+    if is_website_scrape:
+        executor.submit(
+            _run_website_scrape,
+            job_id,
+            website_domain,
+            website_pages,
+            Path(job["_output_path"]),
+            cancel_event,
+        )
         return jsonify(id=job_id, status_url=f"/api/jobs/{job_id}"), 202
     executor.submit(
         _run_pipeline,
@@ -772,7 +1093,13 @@ def job_status(job_id):
 def download_job(job_id):
     with jobs_lock:
         job = jobs.get(job_id)
-        if not job or job["status"] != "completed":
+        if not job or (
+            job["status"] != "completed"
+            and not (
+                job["status"] in {"failed", "cancelled"}
+                and job.get("download_url")
+            )
+        ):
             abort(404)
         output_path = Path(job.get("output_path", ""))
         download_name = job.get("_download_name", OUTPUT_FILENAME)

@@ -58,6 +58,16 @@
               <span class="workflow-icon upload-icon" aria-hidden="true">↑</span>
               <span><strong>Analyser un Excel</strong><small>Traiter un classeur existant</small></span>
             </label>
+            <label class="workflow-choice" for="workflow-websites">
+              <input id="workflow-websites" name="workflow_mode" type="radio" value="websites">
+              <span class="workflow-icon website-icon" aria-hidden="true">↗</span>
+              <span><strong>Liens de sites web</strong><small>Exporter les liens Google Maps</small></span>
+            </label>
+            <label class="workflow-choice" for="workflow-contacts">
+              <input id="workflow-contacts" name="workflow_mode" type="radio" value="contacts">
+              <span class="workflow-icon contact-icon" aria-hidden="true">@</span>
+              <span><strong>Contacts et réseaux sociaux</strong><small>Enrichir un Excel de liens Website</small></span>
+            </label>
           </fieldset>
           <div id="city-workflow">
           <section class="form-section">
@@ -176,7 +186,38 @@
                 <input id="upload-analysis-google" name="upload_analysis" type="radio" value="google">
                 <span><strong>Google et Maps</strong><small>Résultats sponsorisés et pages Maps</small></span>
               </label>
+              <label class="mode-choice" for="upload-analysis-contacts">
+                <input id="upload-analysis-contacts" name="upload_analysis" type="radio" value="contacts">
+                <span><strong>Contacts et réseaux sociaux</strong><small>Emails, Instagram, LinkedIn, Facebook, X et pages de cookies publiques</small></span>
+              </label>
             </fieldset>
+            <p class="upload-cookie-note">Jusqu’à 12 pages publiques pertinentes par site. Les cookies de session, jetons et données du navigateur ne sont jamais collectés.</p>
+          </section>
+
+          <section id="website-workflow" class="form-section website-workflow" hidden>
+            <div class="section-heading">
+              <span class="step-number">01</span>
+              <div>
+                <h2>Scraper les liens Google Maps</h2>
+                <p>Entrez un domaine ou une recherche Google, puis le nombre de pages à parcourir.</p>
+              </div>
+            </div>
+            <div class="field-grid">
+              <div class="field-wrap">
+                <label for="website-domain">Domaine ou mots-clés</label>
+                <input id="website-domain" name="website_domain" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="seo services ottawa">
+              </div>
+              <div id="website-pages-field" class="field-wrap">
+                <label for="website-pages">Nombre de pages</label>
+                <input id="website-pages" name="website_pages" type="number" min="1" max="10" value="3">
+              </div>
+            </div>
+            <label class="all-cities-choice" for="website-all-pages">
+              <input id="website-all-pages" name="website_all_pages" type="checkbox">
+              <span class="checkmark" aria-hidden="true"></span>
+              <span class="option-copy"><strong>Toutes les pages disponibles</strong><small>Continuer jusqu’à ce que Google ne propose plus de page suivante.</small></span>
+            </label>
+            <div class="field-meta"><span>Maximum : 10 pages, sauf si toutes les pages sont sélectionnées.</span><span>Résultats exportés en Excel</span></div>
           </section>
 
           <div class="submit-row">
@@ -186,7 +227,7 @@
                 <svg viewBox="0 0 20 20" fill="none"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </span>
             </button>
-            <p><span class="secure-icon" aria-hidden="true">●</span> Chrome s’ouvrira sur cet ordinateur pendant les vérifications.</p>
+            <p><span class="secure-icon" aria-hidden="true">●</span> Le traitement s’exécute localement sur cet ordinateur.</p>
           </div>
           <div id="form-error" class="form-error" role="alert" hidden></div>
         </form>

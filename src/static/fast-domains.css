@@ -371,7 +371,7 @@ textarea:focus, input:not([type="checkbox"]):not([type="radio"]):focus {
 .footer i { color: #c0c6d1; font-style: normal; }
 .workflow-picker {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin: 0 0 25px;
   padding: 0 0 22px;
@@ -413,7 +413,9 @@ textarea:focus, input:not([type="checkbox"]):not([type="radio"]):focus {
   font-weight: 500;
 }
 .upload-icon { background: #eef5ff; color: #4266bd; }
+.website-icon { background: #eaf7f1; color: #16845a; }
 .upload-workflow { margin-bottom: 20px; }
+.website-workflow { margin-bottom: 20px; }
 .upload-file {
   position: relative;
   display: flex;
@@ -449,6 +451,7 @@ textarea:focus, input:not([type="checkbox"]):not([type="radio"]):focus {
 .upload-file-action { margin-left: auto; padding: 7px 10px; border: 1px solid #e0e4ec; border-radius: 7px; background: #fff; color: #4f46e5; font-size: 9px; white-space: nowrap; }
 .upload-analysis-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin: 0; padding: 0; border: 0; }
 .upload-analysis-picker .mode-choice { min-height: 65px; }
+.upload-cookie-note { margin: 12px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .tld-field { margin-bottom: 16px; }
 .tld-field input { max-width: 250px; }
 .tld-field p { margin: 6px 0 0; color: #8791a2; font-size: 9px; line-height: 1.5; }
@@ -538,7 +541,8 @@ textarea:focus, input:not([type="checkbox"]):not([type="radio"]):focus {
   .section-heading p { font-size: 10px; }
   .city-mode-picker { grid-template-columns: 1fr; gap: 8px; }
   .workflow-picker { gap: 8px; margin-bottom: 21px; padding-bottom: 18px; }
-  .workflow-choice { align-items: flex-start; flex-direction: column; gap: 8px; min-height: 96px; padding: 10px; }
+  .workflow-picker { grid-template-columns: 1fr; }
+  .workflow-choice { align-items: center; flex-direction: row; gap: 8px; min-height: 62px; padding: 10px; }
   .workflow-icon { flex-basis: 28px; width: 28px; height: 28px; }
   .upload-analysis-picker { grid-template-columns: 1fr; }
   .mode-choice { min-height: 60px; }

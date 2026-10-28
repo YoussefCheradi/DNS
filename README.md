@@ -22,6 +22,7 @@ Le pipeline envisagé comporte trois étapes :
 1. **ExpiredDomains** : se connecter à `expireddomains.net`, appliquer les filtres définis dans le script et collecter des domaines pour des villes américaines.
 2. **SEO Web Checker** : envoyer les domaines au vérificateur en ligne pour obtenir le statut, le code HTTP, l’adresse IP résolue et une note.
 3. **Google et Google Maps** : rechercher les domaines avec un navigateur Chrome et compléter le classeur avec `Sponsored Results` et `Google Maps Pages`.
+4. **Liens de sites web Google Maps** : depuis l’application web, rechercher un domaine, parcourir jusqu’à 10 pages Google Maps et exporter les liens « Website » dans un classeur séparé.
 
 L’application web peut lancer les trois étapes à la suite. Le point d’entrée historique `src/main.py`, lui, ne lance actuellement que l’étape 3. L’enrichissement Google traite les domaines quel que soit leur code HTTP. Les lignes déjà renseignées pour les deux champs Google sont ignorées. Le classeur est sauvegardé après chaque domaine traité.
 
@@ -36,7 +37,7 @@ L’application web peut lancer les trois étapes à la suite. Le point d’entr
 | `requirements.txt` | Dépendances Python du projet et de l’application web. |
 | `src/scrap_from_E_D/E_D.py` | Connexion à ExpiredDomains, configuration des filtres, pagination et sauvegarde Excel. |
 | `src/seowebchecker_bulk_domain_check.py` | Vérification en lot sur SEO Web Checker et fusion des colonnes DNS dans le classeur principal. |
-| `src/scrap_from_Google/Google.py` | Recherche Google/Google Maps avec Selenium et `undetected_chromedriver`. C’est l’implémentation appelée par `main.py`. |
+| `src/scrap_from_Google/Google.py` | Recherche Google/Google Maps avec Selenium et `undetected_chromedriver`, enrichissement Excel et collecte des liens Website. |
 | `src/scrap_from_Google/Google2.py` | Variante utilisant l’API Serper. Elle n’est pas appelée par `main.py`. |
 | `src/citys/us_cities_sample.xlsx` | Liste de villes utilisée par le scraper ExpiredDomains. Le bloc de `main.py`, s’il est activé, lit les 50 premières lignes. |
 | `coordonner.py` | Petit utilitaire qui affiche les coordonnées de la souris après cinq secondes. |
@@ -98,23 +99,48 @@ Pour lancer l’application sans ouvrir PowerShell manuellement, créez un fichi
 
 ```bat
 @echo off
-cd /d "%~dp0DNS"
+setlocal
 
-if not exist "src\web_app.py" (
-    echo Impossible de trouver le projet dans "%~dp0DNS".
+set "PROJECT_DIR=%~dp0DNS"
+if not exist "%PROJECT_DIR%\src\web_app.py" set "PROJECT_DIR=%~dp0"
+
+if not exist "%PROJECT_DIR%\src\web_app.py" (
+    echo Impossible de trouver src\web_app.py dans "%~dp0DNS" ni dans "%~dp0".
     pause
     exit /b 1
 )
 
-if exist ".venv-1\Scripts\python.exe" (
-    ".venv-1\Scripts\python.exe" "src\web_app.py"
-) else if exist ".venv\Scripts\python.exe" (
-    ".venv\Scripts\python.exe" "src\web_app.py"
+set "PYTHON_CMD="
+set "PYTHON_ARGS="
+if exist "%PROJECT_DIR%\.venv-1\Scripts\python.exe" (
+    set "PYTHON_CMD=%PROJECT_DIR%\.venv-1\Scripts\python.exe"
+) else if exist "%PROJECT_DIR%\.venv\Scripts\python.exe" (
+    set "PYTHON_CMD=%PROJECT_DIR%\.venv\Scripts\python.exe"
 ) else (
-    python "src\web_app.py"
+    where py >nul 2>nul
+    if not errorlevel 1 (
+        set "PYTHON_CMD=py"
+        set "PYTHON_ARGS=-3"
+    ) else (
+        where python >nul 2>nul
+        if not errorlevel 1 set "PYTHON_CMD=python"
+    )
 )
 
+if not defined PYTHON_CMD (
+    echo Python est introuvable. Installez Python ou creez l'environnement .venv du projet.
+    pause
+    exit /b 1
+)
+
+pushd "%PROJECT_DIR%"
+"%PYTHON_CMD%" %PYTHON_ARGS% "src\web_app.py"
+set "EXIT_CODE=%ERRORLEVEL%"
+popd
+
+if not "%EXIT_CODE%"=="0" echo L'application s'est arretee avec le code %EXIT_CODE%.
 pause
+exit /b %EXIT_CODE%
 ```
 
 Double-cliquez sur `Domain_finder.bat` pour démarrer le serveur, puis ouvrez [http://127.0.0.1:5000](http://127.0.0.1:5000) dans votre navigateur. Pour arrêter le serveur, revenez à la fenêtre de commande et appuyez sur `Ctrl+C`.
@@ -126,7 +152,13 @@ Avant la première recherche Google, préparez le profil Chrome utilisé par l�
 
 Ouvrez ensuite [http://127.0.0.1:5000](http://127.0.0.1:5000). Le serveur de développement redémarre automatiquement après une modification du code Python ; les templates et les fichiers CSS/JavaScript sont servis sans cache. Actualisez la page du navigateur pour afficher les changements visuels. Choisissez « Rechercher par ville » pour la collecte habituelle, puis sélectionnez les États-Unis (`src/citys/us_cities_sample.xlsx`) ou le Canada (`src/citys/villes_canada.xlsx`). La liste des villes et les positions de l’intervalle sont actualisées selon le pays. Vous pouvez saisir des villes manuellement, choisir un intervalle inclusif à partir de la position 1, ou cocher « Scanner toutes les villes ». Les dix premières villes du pays choisi sont proposées par défaut. Renseignez les identifiants ExpiredDomains et, si nécessaire, Gmail pour cette collecte.
 
-Choisissez « Analyser un Excel » pour importer un classeur `.xlsx` de 30 Mo maximum contenant une colonne `Domain` ou `Domaine .net`. Sélectionnez soit « Statut DNS et HTTP », soit « Google et Maps » ; l’application analyse le classeur importé sans lancer la collecte de villes et propose le fichier enrichi au téléchargement. L’import est traité dans un dossier temporaire local et n’écrase pas le classeur principal du projet.
+Choisissez « Analyser un Excel » pour importer un classeur `.xlsx` de 30 Mo maximum contenant une colonne `Domain` ou `Domaine .net`, puis sélectionnez « Statut DNS et HTTP » ou « Google et Maps » pour les analyses existantes. Le mode « Contacts et réseaux sociaux » est également disponible directement dans les modes de traitement : fournissez le classeur produit par « Liens de sites web » avec une colonne `Website URL` ou `Website`. L’application explore jusqu’à 12 pages pertinentes du même site, en privilégiant Contact, About, Team, Services et les pages de confidentialité, ainsi que les liens pertinents du sitemap. Elle extrait les emails visibles, encodés, obfusqués, `mailto:`, les données structurées JSON-LD et les adresses présentes dans des scripts intégrés, ainsi que les profils Instagram, LinkedIn, Facebook et X trouvés dans les liens, scripts ou champs `sameAs`. Les valeurs sont normalisées et dédupliquées ; chaque adresse et profil garde l’URL de sa page source. Les emails sont marqués `unverified` (leur existence/délivrabilité n’est pas testée), et l’association d’un lien social à l’entreprise reste `unverified`. Les colonnes de résultat indiquent les pages visitées, ignorées ou échouées ; les erreurs réseau temporaires sont retentées. Une session HTTP distincte par site conserve en mémoire les cookies reçus de ce site pendant le traitement, puis est fermée ; le profil Chrome, les cookies d’autres sites, les valeurs de cookies, jetons de session et données de stockage local ne sont pas lus ni exportés. Seul le texte public des bannières et politiques de cookies est relevé. Le code JavaScript des pages n’est pas exécuté : les liens ou coordonnées uniquement créés dans le DOM après exécution du JavaScript peuvent donc manquer. Le classeur final est sauvegardé après chaque site et proposé au téléchargement, en conservant les colonnes du fichier source. L’import est traité dans un dossier temporaire local et n’écrase pas le classeur principal du projet.
+
+Le crawler ne conserve que les emails dont le domaine partage un nom distinctif avec le domaine du site. Les fournisseurs personnels courants (Gmail, Outlook, Yahoo, etc.) sont conservés même sans correspondance ; les domaines email sans lien détectable avec le site sont écartés. Cette règle est heuristique : elle peut écarter une adresse professionnelle légitime hébergée sur un domaine tiers.
+
+Les emails visibles dans le contenu du site, les bannières et les pages de politique de cookies/confidentialité sont également recherchés avec le même filtre de domaine. Les valeurs brutes des cookies HTTP ne sont pas inspectées, car elles peuvent contenir des identifiants de session ou d’autres données privées.
+
+Choisissez « Liens de sites web » pour saisir un domaine ou des mots-clés de recherche (par exemple `seo services ottawa`) et le nombre de pages Google Maps à parcourir (1 à 10), ou cochez « Toutes les pages disponibles » pour poursuivre jusqu’à ce que Google ne fournisse plus de page suivante. Après l’ouverture de « More businesses/More places », le scraper attend dix secondes avant d’extraire les liens « Website ». Chaque nouveau lien est immédiatement enregistré dans le classeur Excel (écriture atomique), afin que les résultats déjà collectés restent disponibles en cas d’interruption; un classeur partiel peut être téléchargé après un échec ou une annulation. Les colonnes sont `Domain`, `Google Maps Page` et `Website URL`. La gestion CAPTCHA et le profil Chrome sont les mêmes que pour l’enrichissement Google.
 
 Choisissez ensuite les analyses SEO Web Checker et Google/Maps à exécuter. Le champ TLD accepte par exemple `.net`, `.us`, `.com` ou `.co.uk`. Le filtre « Name in TLD is registered » d’ExpiredDomains reçoit ce TLD, puis les domaines correspondants sont ajoutés au classeur et envoyés aux analyses sélectionnées. Chaque combinaison pays/TLD possède son propre classeur : `.net` aux États-Unis utilise `expired_domains_TLD_net_final.xlsx`, tandis que `.net` au Canada utilise `expired_domains_CA_TLD_net_final.xlsx`. Les autres pays utilisent leur code dans le nom, par exemple `expired_domains_FR_TLD_net_final.xlsx`. Les domaines collectés dans un pays ne sont donc pas fusionnés avec ceux d’un autre. La page affiche le nom et le lien de téléchargement du classeur choisi. Vous pouvez annuler un traitement actif ; les domaines déjà collectés sont enregistrés. En cas d’erreur, vous pouvez reprendre à la dernière étape acquise, annuler/clôturer le processus ou le redémarrer depuis le début. La reprise conserve les villes et domaines déjà traités ; pendant la collecte, une ville interrompue avant sa fin est relancée en entier. Un redémarrage ne supprime pas les classeurs et réanalyse aussi les nouveaux domaines de la tentative échouée. Les points de reprise sont gardés en mémoire et sont perdus si le serveur est redémarré. Chrome s’ouvre sur la machine locale pendant les vérifications. Un seul traitement peut tourner à la fois.
 

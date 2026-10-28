@@ -5,13 +5,25 @@ import pandas as pd
 import os
 from pathlib import Path
 from typing import Callable
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 from dotenv import load_dotenv
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 load_dotenv()
+
+MORE_BUSINESSES_SELECTORS = [
+    "//*[contains(text(),'More businesses')]",
+    "//*[contains(text(),'More places')]",
+    "//*[contains(text(),'More locations')]",
+    "//*[contains(text(),'Plus d')]",
+    "//*[contains(text(),'Plus de lieux')]",
+]
+CHROME_CLOSE_DELAY_SECONDS = 2
+BUSINESS_PANEL_SETTLE_SECONDS = 10
 
 
 # ======================
@@ -58,6 +70,306 @@ def get_or_restart_driver(driver, wait):
     return driver, wait
 
 
+def _find_more_businesses_button(driver):
+    for selector in MORE_BUSINESSES_SELECTORS:
+        elements = driver.find_elements(By.XPATH, selector)
+        if elements:
+            return elements[0]
+    return None
+
+
+def _extract_website_links(driver):
+    links = []
+    candidates = driver.execute_script(
+        """
+        return [...document.querySelectorAll(
+            'a.cevG5.NJ7wce[href], a.yYlJEf.L48Cpd[href], a[href]'
+        )]
+            .filter(a =>
+                a.matches('.cevG5.NJ7wce, .yYlJEf.L48Cpd') ||
+                [...a.querySelectorAll('span')].some(
+                    span => span.textContent.trim() === 'Website'
+                )
+            )
+            .map(a => a.href);
+        """
+    )
+    candidates.extend(
+        re.findall(
+            r'\["(https?://[^"\\]+)"\s*,\s*\d+\s*,\s*7\s*,\s*1\s*,'
+            r'\s*\[[^\]]*\]\s*,\s*"Place website"\]',
+            driver.page_source,
+        )
+    )
+    for href in candidates:
+        if not href:
+            continue
+        parsed = urlparse(href)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            continue
+        host = parsed.hostname.lower() if parsed.hostname else ""
+        if host == "google.com" or host.endswith(".google.com"):
+            redirect = parse_qs(parsed.query)
+            target = (redirect.get("url") or redirect.get("q") or [None])[0]
+            if target:
+                href = target
+                parsed = urlparse(href)
+        if parsed.scheme in {"http", "https"} and parsed.netloc:
+            links.append(urlunparse(parsed._replace(fragment="")))
+    return list(dict.fromkeys(links))
+
+
+def _extract_links_by_opening_business_cards(driver, page_number, cancel_check=None):
+    heading_selector = ".VkpGBb .dbg0pd"
+    heading_count = driver.execute_script(
+        "return document.querySelectorAll(arguments[0]).length;",
+        heading_selector,
+    )
+    links = []
+
+    for index in range(heading_count):
+        if cancel_check is not None:
+            cancel_check()
+        previous_links = set(
+            driver.execute_script(
+                "return [...document.querySelectorAll('a.cevG5.NJ7wce[href]')].map(a => a.href);"
+            )
+        )
+        business_name = driver.execute_script(
+            """
+            const heading = document.querySelectorAll(arguments[0])[arguments[1]];
+            if (!heading) return null;
+            const card = heading.closest('[role="button"]') || heading;
+            const name = heading.innerText.trim();
+            card.click();
+            return name;
+            """,
+            heading_selector,
+            index,
+        )
+        if business_name is None:
+            continue
+
+        try:
+            WebDriverWait(driver, 5).until(
+                lambda current_driver: any(
+                    href not in previous_links
+                    for href in current_driver.execute_script(
+                        "return [...document.querySelectorAll('a.cevG5.NJ7wce[href]')].map(a => a.href);"
+                    )
+                )
+            )
+        except TimeoutException:
+            pass
+
+        time.sleep(BUSINESS_PANEL_SETTLE_SECONDS)
+        business_links = [
+            href
+            for href in driver.execute_script(
+                "return [...document.querySelectorAll('a.cevG5.NJ7wce[href]')].map(a => a.href);"
+            )
+            if href not in previous_links
+        ]
+        if business_links:
+            links.extend(business_links)
+            print(f"  -> {business_name or 'Résultat'} : {business_links[0]}")
+        else:
+            print(f"  -> {business_name or 'Résultat'} : aucun lien Website")
+
+    return list(dict.fromkeys(links))
+
+
+def _wait_for_website_links(driver, timeout=15):
+    try:
+        WebDriverWait(driver, timeout).until(
+            lambda current_driver: current_driver.find_elements(
+                By.XPATH,
+                "//a[@href and .//span[normalize-space()='Website']]",
+            )
+            or current_driver.find_elements(
+                By.CSS_SELECTOR,
+                "a.yYlJEf.L48Cpd[href]",
+            )
+            or '"Place website"' in current_driver.page_source
+        )
+    except TimeoutException:
+        return False
+    return True
+
+
+def _wait_for_maps_results(driver, timeout=10):
+    try:
+        WebDriverWait(driver, timeout).until(
+            lambda current_driver: (
+                current_driver.find_elements(By.CSS_SELECTOR, "a.yYlJEf.L48Cpd[href]")
+                or _find_more_businesses_button(current_driver)
+            )
+        )
+    except TimeoutException:
+        return False
+    return True
+
+
+def _maps_pagination_links(driver):
+    pages = {}
+    for element in driver.find_elements(By.XPATH, "//a[@href]"):
+        href = element.get_attribute("href")
+        if not href:
+            continue
+        parsed = urlparse(href)
+        if parsed.path != "/search" or not parsed.hostname:
+            continue
+        host = parsed.hostname.lower()
+        if host != "google.com" and not host.endswith(".google.com"):
+            continue
+        start_values = parse_qs(parsed.query).get("start", [])
+        if not start_values:
+            continue
+        try:
+            start = int(start_values[0])
+        except ValueError:
+            continue
+        if start > 0:
+            pages.setdefault(start, href)
+    return [pages[start] for start in sorted(pages)]
+
+
+def scrape_google_website_links(
+    domain,
+    pages: int | None,
+    progress_callback: Callable[[str], None] | None = None,
+    cancel_check: Callable[[], None] | None = None,
+    result_callback: Callable[[dict], None] | None = None,
+):
+    print("  -> Lancement Chrome pour le scraping des liens...", flush=True)
+    driver, _ = init_driver()
+    results = []
+    seen_links = set()
+
+    try:
+        def collect_current_page(page_number):
+            page_links = _extract_links_by_opening_business_cards(
+                driver,
+                page_number,
+                cancel_check=cancel_check,
+            )
+            if not page_links:
+                page_links = _extract_website_links(driver)
+            for href in page_links:
+                if href not in seen_links:
+                    result = {"Google Maps Page": page_number, "Website URL": href}
+                    results.append(result)
+                    seen_links.add(href)
+                    if result_callback is not None:
+                        result_callback(result)
+            return len(page_links)
+
+        search_queries = list(dict.fromkeys((domain, domain_to_query(domain))))
+        selected_query = None
+        current_page_url = None
+        for query in search_queries:
+            search_url = "https://www.google.com/search?" + urlencode(
+                {"q": query, "hl": "en", "gl": "us"}
+            )
+            if progress_callback is not None:
+                progress_callback(f"Recherche Google : {query}")
+            driver.get(search_url)
+            time.sleep(random.uniform(3, 5))
+            check_captcha(driver, search_url)
+
+            if cancel_check is not None:
+                cancel_check()
+            _wait_for_maps_results(driver)
+            more_button = _find_more_businesses_button(driver)
+            if more_button:
+                driver.execute_script("arguments[0].click();", more_button)
+                time.sleep(random.uniform(3, 5))
+                current_page_url = driver.current_url
+                check_captcha(driver, current_page_url)
+                _wait_for_website_links(driver)
+                page_one_link_count = collect_current_page(1)
+                selected_query = query if seen_links else None
+                if selected_query:
+                    break
+            else:
+                current_page_url = driver.current_url
+
+            if progress_callback is not None:
+                progress_callback(
+                    f"Résultats pour « {query} » : {len(seen_links)} lien(s) après ouverture de Maps, "
+                    f"bloc More businesses {'présent' if more_button else 'absent'}."
+                )
+
+        if selected_query is None:
+            if progress_callback is not None:
+                progress_callback(
+                    "Aucun résultat Google Maps avec un lien Website trouvé pour "
+                    f"{', '.join(search_queries)}. "
+                    f"Page affichée : {driver.title} ({driver.current_url})."
+                )
+            return results
+
+        current_start_values = parse_qs(urlparse(current_page_url).query).get("start", [])
+        visited_starts = {int(current_start_values[0]) if current_start_values else 0}
+
+        page_number = 1
+        while pages is None or page_number <= pages:
+            if cancel_check is not None:
+                cancel_check()
+
+            if page_number > 1:
+                current_start_values = parse_qs(urlparse(current_page_url).query).get("start", [])
+                current_start = (
+                    int(current_start_values[0])
+                    if current_start_values and current_start_values[0].isdigit()
+                    else 0
+                )
+                pagination_links = _maps_pagination_links(driver)
+                next_url = next(
+                    (
+                        href for href in pagination_links
+                        if (
+                            (start_values := parse_qs(urlparse(href).query).get("start", []))
+                            and start_values[0].isdigit()
+                            and int(start_values[0]) > current_start
+                            and int(start_values[0]) not in visited_starts
+                        )
+                    ),
+                    None,
+                )
+                if next_url is None:
+                    break
+                current_page_url = next_url
+                next_start = int(parse_qs(urlparse(next_url).query)["start"][0])
+                visited_starts.add(next_start)
+                driver.get(current_page_url)
+                time.sleep(random.uniform(3, 7))
+                check_captcha(driver, current_page_url)
+                _wait_for_website_links(driver)
+
+            page_link_count = (
+                page_one_link_count
+                if page_number == 1
+                else collect_current_page(page_number)
+            )
+            if progress_callback is not None:
+                page_limit = "toutes" if pages is None else str(pages)
+                progress_callback(
+                    f"Page Google Maps {page_number}/{page_limit} : "
+                    f"{page_link_count} lien(s) Website trouvé(s)."
+                )
+            page_number += 1
+
+        return results
+    finally:
+        print(
+            f"  -> Chrome restera ouvert {CHROME_CLOSE_DELAY_SECONDS} secondes...",
+            flush=True,
+        )
+        try:
+            time.sleep(CHROME_CLOSE_DELAY_SECONDS)
+        finally:
+            driver.quit()
 
 
 def check_captcha(driver, url):
@@ -176,20 +488,9 @@ def get_more_businesses_pages(driver, wait, query):
         check_captcha(driver, url)
 
         more_btn = None
-        selectors = [
-            "//*[contains(text(),'More businesses')]",
-            "//*[contains(text(),'More places')]",
-            "//*[contains(text(),'More locations')]",
-            "//*[contains(text(),'Plus d')]",
-            "//*[contains(text(),'Plus de lieux')]",
-        ]
-
-        for selector in selectors:
-            elements = driver.find_elements(By.XPATH, selector)
-            if elements:
-                more_btn = elements[0]
-                print(f"  OK Bouton trouve : '{elements[0].text.strip()}'")
-                break
+        more_btn = _find_more_businesses_button(driver)
+        if more_btn:
+            print(f"  OK Bouton trouve : '{more_btn.text.strip()}'")
 
         if not more_btn:
             print(f"  Info : Pas de 'More businesses' ni 'More locations' ni 'More places' pour '{query}'")

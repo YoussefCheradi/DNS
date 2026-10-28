@@ -18,8 +18,13 @@ const scanAllCities = document.querySelector("#scan-all-cities");
 const citySelectionOptions = document.querySelector("#city-selection-options");
 const cityWorkflow = document.querySelector("#city-workflow");
 const uploadWorkflow = document.querySelector("#upload-workflow");
+const websiteWorkflow = document.querySelector("#website-workflow");
 const workbookFile = document.querySelector("#workbook-file");
 const workbookFileName = document.querySelector("#workbook-file-name");
+const websiteDomain = document.querySelector("#website-domain");
+const websitePages = document.querySelector("#website-pages");
+const websiteAllPages = document.querySelector("#website-all-pages");
+const websitePagesField = document.querySelector("#website-pages-field");
 const statusTitle = document.querySelector("#status-title");
 const statusDescription = document.querySelector("#status-description");
 const retryButton = document.querySelector("#retry-button");
@@ -52,26 +57,47 @@ function countCities() {
 
 function updateCityMode() {
   const allCities = scanAllCities.checked;
-  const uploadMode = form.querySelector('input[name="workflow_mode"]:checked').value === "upload";
+  const workflowMode = form.querySelector('input[name="workflow_mode"]:checked').value;
+  const uploadMode = workflowMode === "upload" || workflowMode === "contacts";
+  const websiteMode = workflowMode === "websites";
   citySelectionOptions.hidden = allCities;
   const mode = form.querySelector('input[name="city_mode"]:checked').value;
   const manual = mode === "manual" && !allCities;
   manualCityFields.hidden = !manual;
   rangeCityFields.hidden = !allCities && mode === "manual";
-  cityInput.required = !uploadMode && manual;
-  cityStart.required = !uploadMode && !allCities && mode === "range";
-  cityEnd.required = !uploadMode && !allCities && mode === "range";
+  cityInput.required = !uploadMode && !websiteMode && manual;
+  cityStart.required = !uploadMode && !websiteMode && !allCities && mode === "range";
+  cityEnd.required = !uploadMode && !websiteMode && !allCities && mode === "range";
   updateRangeCount();
 }
 
 function updateWorkflowMode() {
-  const uploadMode = form.querySelector('input[name="workflow_mode"]:checked').value === "upload";
-  cityWorkflow.hidden = uploadMode;
+  const workflowMode = form.querySelector('input[name="workflow_mode"]:checked').value;
+  const uploadMode = workflowMode === "upload" || workflowMode === "contacts";
+  const websiteMode = workflowMode === "websites";
+  cityWorkflow.hidden = uploadMode || websiteMode;
   uploadWorkflow.hidden = !uploadMode;
+  websiteWorkflow.hidden = !websiteMode;
+  uploadWorkflow.querySelector(".section-heading").hidden = workflowMode === "contacts";
+  uploadWorkflow.querySelector(".upload-analysis-picker").hidden = workflowMode === "contacts";
+  uploadWorkflow.querySelector(".upload-cookie-note").hidden = workflowMode === "contacts";
+  if (workflowMode === "contacts") {
+    form.querySelector("#upload-analysis-contacts").checked = true;
+  }
+  uploadWorkflow.querySelector(".section-heading p").textContent = workflowMode === "contacts"
+    ? "Choisissez le classeur de liens Google Maps à enrichir (colonne « Website URL »)."
+    : "Choisissez un classeur Excel contenant une colonne « Domain » ou « Domaine .net ».";
   updateCityMode();
   submitButton.querySelector(".button-label").textContent = uploadMode
-    ? "Analyser le classeur"
-    : "Lancer la recherche";
+    ? workflowMode === "contacts" ? "Lancer l’extraction" : "Analyser le classeur"
+    : websiteMode
+      ? "Scraper les liens"
+      : "Lancer la recherche";
+}
+
+function updateWebsitePageMode() {
+  websitePagesField.hidden = websiteAllPages.checked;
+  websitePages.disabled = websiteAllPages.checked;
 }
 
 function updateRangeCount() {
@@ -128,7 +154,9 @@ function renderJob(job) {
   statusDescription.textContent = job.status === "failed"
     ? (job.error || "Le traitement n’a pas pu aboutir.")
     : job.status === "cancelled"
-      ? "Le traitement a été annulé. Les résultats déjà collectés restent enregistrés."
+      ? job.result_unit === "lien"
+        ? "Le scraping des liens Google Maps a été annulé."
+        : "Le traitement a été annulé. Les résultats déjà collectés restent enregistrés."
       : job.status === "cancelling"
         ? "Annulation demandée ; l’étape navigateur en cours peut devoir se terminer."
     : job.status === "completed"
@@ -162,10 +190,16 @@ function renderJob(job) {
     activityLog.append(item);
   }
 
-  if (job.status === "completed" && job.download_url) {
+  if (job.download_url) {
     downloadLink.href = job.download_url;
-    resultCount.textContent = `${job.row_count} ${job.row_count > 1 ? "domaines" : "domaine"}`;
+    const unit = job.result_unit || "domaine";
+    resultCount.textContent = `${job.row_count} ${unit}${job.row_count > 1 ? "s" : ""}`;
+    downloadBlock.querySelector("strong").textContent = job.status === "completed"
+      ? "Votre fichier est prêt"
+      : "Résultats partiels sauvegardés";
     downloadBlock.hidden = false;
+  } else {
+    downloadBlock.hidden = true;
   }
   retryButton.hidden = job.status !== "failed";
   retryButton.disabled = false;
@@ -189,20 +223,47 @@ function renderJob(job) {
 async function pollJob(statusUrl) {
   if (polling) return;
   polling = true;
+  let connectionFailures = 0;
+  const maxConnectionFailures = 8;
 
   while (polling) {
+    let response;
     try {
-      const response = await fetch(statusUrl, { cache: "no-store" });
-      const job = await response.json();
-      if (!response.ok) throw new Error(job.error || "Impossible de lire l’état du traitement.");
-      renderJob(job);
-      if (["completed", "failed", "cancelled"].includes(job.status)) break;
-    } catch (error) {
-      showError(error.message);
+      response = await fetch(statusUrl, { cache: "no-store" });
+    } catch {
+      connectionFailures += 1;
+      if (connectionFailures > maxConnectionFailures) {
+        showError("Impossible de joindre l’application locale après plusieurs tentatives. Le traitement a peut-être continué ; vérifiez les résultats déjà enregistrés avant de le relancer.");
+        submitButton.disabled = false;
+        polling = false;
+        break;
+      }
+      statusDescription.textContent = "Connexion temporairement interrompue ; tentative de reconnexion au suivi du traitement…";
+      const delay = Math.min(1400 * (2 ** Math.min(connectionFailures - 1, 2)), 5000);
+      await new Promise((resolve) => window.setTimeout(resolve, delay));
+      continue;
+    }
+
+    connectionFailures = 0;
+    if (!response.ok) {
+      showError(`Impossible de lire l’état du traitement (HTTP ${response.status}).`);
       submitButton.disabled = false;
       polling = false;
       break;
     }
+
+    let job;
+    try {
+      job = await response.json();
+    } catch (error) {
+      showError(`Réponse invalide du serveur lors du suivi (${error.message}).`);
+      submitButton.disabled = false;
+      polling = false;
+      break;
+    }
+
+    renderJob(job);
+    if (["completed", "failed", "cancelled"].includes(job.status)) break;
     await new Promise((resolve) => window.setTimeout(resolve, 1400));
   }
 }
@@ -274,6 +335,7 @@ cancelButton.addEventListener("click", async () => {
 
 cityInput.addEventListener("input", countCities);
 countrySelect.addEventListener("change", loadCountryCities);
+websiteAllPages.addEventListener("change", updateWebsitePageMode);
 form.querySelectorAll('input[name="city_mode"]').forEach((input) => input.addEventListener("change", updateCityMode));
 form.querySelectorAll('input[name="workflow_mode"]').forEach((input) => input.addEventListener("change", updateWorkflowMode));
 scanAllCities.addEventListener("change", updateCityMode);
@@ -306,19 +368,36 @@ countCities();
 updateOutputFilename();
 updateCityMode();
 updateWorkflowMode();
+updateWebsitePageMode();
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   formError.hidden = true;
   downloadBlock.hidden = true;
 
-  const uploadMode = form.querySelector('input[name="workflow_mode"]:checked').value === "upload";
+  const workflowMode = form.querySelector('input[name="workflow_mode"]:checked').value;
+  const uploadMode = workflowMode === "upload" || workflowMode === "contacts";
+  const websiteMode = workflowMode === "websites";
   if (uploadMode && !workbookFile.files.length) {
     showError("Sélectionnez un classeur Excel à analyser.");
     return;
   }
+  if (websiteMode) {
+    const domain = websiteDomain.value.trim();
+    const pages = Number(websitePages.value);
+    if (!domain) {
+      showError("Entrez un nom de domaine, par exemple example.com.");
+      websiteDomain.focus();
+      return;
+    }
+    if (!websiteAllPages.checked && (!Number.isInteger(pages) || pages < 1 || pages > 10)) {
+      showError("Choisissez un nombre de pages compris entre 1 et 10.");
+      websitePages.focus();
+      return;
+    }
+  }
   const mode = form.querySelector('input[name="city_mode"]:checked').value;
-  if (!uploadMode && !scanAllCities.checked) {
+  if (!uploadMode && !websiteMode && !scanAllCities.checked) {
     if (mode === "manual") {
       const cities = cityInput.value.split(/\r?\n/).map((city) => city.trim()).filter(Boolean);
       if (!cities.length) {
@@ -348,24 +427,40 @@ form.addEventListener("submit", async (event) => {
   const uploadData = new FormData();
   if (uploadMode) {
     uploadData.append("workbook", workbookFile.files[0]);
-    uploadData.append("analysis", form.querySelector('input[name="upload_analysis"]:checked').value);
+    const analysis = workflowMode === "contacts"
+      ? "contacts"
+      : form.querySelector('input[name="upload_analysis"]:checked').value;
+    uploadData.append("analysis", analysis);
   }
+  const websiteData = {
+    domain: websiteDomain.value.trim(),
+    pages: websiteAllPages.checked ? null : Number(websitePages.value),
+    all_pages: websiteAllPages.checked,
+  };
 
   submitButton.disabled = true;
   submitButton.querySelector(".button-label").textContent = uploadMode ? "Importation…" : "Préparation…";
   statusTitle.textContent = "Demande envoyée";
   statusDescription.textContent = uploadMode
     ? "Importation du classeur et préparation de l’analyse…"
-    : "Connexion au navigateur et préparation du traitement…";
+    : websiteMode
+      ? "Démarrage de Chrome et préparation du scraping Google Maps…"
+      : "Connexion au navigateur et préparation du traitement…";
 
   try {
-    const response = await fetch(uploadMode ? "/api/upload-jobs" : "/api/jobs", uploadMode
+    const endpoint = uploadMode
+      ? "/api/upload-jobs"
+      : websiteMode
+        ? "/api/website-scrape-jobs"
+        : "/api/jobs";
+    const requestOptions = uploadMode
       ? { method: "POST", body: uploadData }
       : {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
+        body: JSON.stringify(websiteMode ? websiteData : data),
+      };
+    const response = await fetch(endpoint, requestOptions);
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "Impossible de démarrer le traitement.");
     retryButton.dataset.statusUrl = result.status_url;
@@ -376,8 +471,11 @@ form.addEventListener("submit", async (event) => {
     submitButton.disabled = false;
     submitButton.querySelector(".button-label").textContent = uploadMode
       ? "Analyser le classeur"
-      : "Lancer la recherche";
+      : websiteMode
+        ? "Scraper les liens"
+        : "Lancer la recherche";
   } finally {
     form.querySelectorAll("input, textarea, button").forEach((field) => { field.disabled = false; });
+    updateWebsitePageMode();
   }
 });
